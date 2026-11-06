@@ -161,14 +161,17 @@ import qrecords, xtc_cpu_processor
                 self.buffer.write(value)
             def recv(self, size):
                 return self.buffer.read(size)
-        sock = MemorySocket()
-        original = record()
-        _codec.send(sock, original)
-        sock.buffer.seek(0)
-        restored = qr.validate_record(_codec.recv(sock))
-        self.assertEqual(restored["timestamp"], original["timestamp"])
-        np.testing.assert_array_equal(restored["q"], original["q"])
-        np.testing.assert_array_equal(restored["peaks"], original["peaks"])
+        for status in qr.STATUSES:
+            with self.subTest(status=status):
+                sock = MemorySocket()
+                original = record(status=status)
+                _codec.send(sock, original)
+                sock.buffer.seek(0)
+                restored = qr.validate_record(_codec.recv(sock))
+                self.assertEqual(restored["timestamp"], original["timestamp"])
+                self.assertEqual(restored["status"], status)
+                np.testing.assert_array_equal(restored["q"], original["q"])
+                np.testing.assert_array_equal(restored["peaks"], original["peaks"])
 
     def test_group_order_skips_and_complete_accounting(self):
         rows = [record(0), record(2, "missing_calibration", 9),
@@ -238,6 +241,9 @@ class ProcessorTests(unittest.TestCase):
         processors = [self.processor(producer_rank=4), self.processor(producer_rank=9)]
         rows = [processors[i % 2].process_event(evt, source_ordinal=i)
                 for i, evt in enumerate(self.run.evts)]
+        for i, row in enumerate(rows):
+            self.assertIs(type(row["timestamp"]), int)
+            self.assertEqual(row["timestamp"], 2**63 + i)
         self.assertEqual(self.run.calls, list(range(6)))  # One calib even on invalid wavelength.
         self.assertEqual(self.run.energy_calls, [0, 2, 3, 4, 5])
         self.assertEqual([r["status"] for r in rows],
