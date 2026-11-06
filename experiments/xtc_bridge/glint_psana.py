@@ -61,7 +61,10 @@ def main(argv=None):
     old_handlers = {}
     try:
         if inside_rank(os.environ):
-            raise ValueError("glint-psana must run outside MPI ranks; launch exactly once")
+            keys = ("OMPI_COMM_WORLD_RANK", "PMI_RANK", "PMIX_RANK", "SLURM_PROCID", "SLURM_STEP_ID", "SLURM_STEPID")
+            detected = ", ".join(f"{key}={os.environ[key]}" for key in keys if key in os.environ)
+            raise ValueError("glint-psana must run outside MPI ranks and srun steps; "
+                             "launch once from the batch script or an salloc shell. Detected: " + detected)
         config = load_config(args.config)
         launcher = args.launcher[1:] if args.launcher[:1] == ["--"] else args.launcher
         destination = args.output.resolve()
@@ -89,6 +92,9 @@ def main(argv=None):
         if process is not None:
             stop_launcher(process)
         if output is not None:
+            # A cancellation or logging error can arrive just after the atomic
+            # success rename. Never leave success beside a failed CLI outcome.
+            (output / "complete.json").unlink(missing_ok=True)
             atomic_json(output / "failed.json", dict(error=f"{type(exc).__name__}: {exc}"))
         print(f"glint-psana: {exc}", file=sys.stderr, flush=True)
         return 1

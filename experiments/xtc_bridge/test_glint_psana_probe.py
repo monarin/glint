@@ -12,13 +12,14 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from envbridge import Env, RemoteError, Worker
 from glint_probe_common import (RANK_ROLES, fixture, identity, load_config,
                                 record_digest, validate_placement)
-from glint_psana import inside_rank, launch_command
+from glint_psana import inside_rank, launch_command, main as launcher_main
 from probe_psana_glint import producer
 
 HERE = Path(__file__).resolve().parent
@@ -60,6 +61,7 @@ class ProbeTests(unittest.TestCase):
         for change in (dict(integrate=True), dict(mode="index"), dict(call_timeout=0),
                        dict(activation_timeout=float("inf")), dict(job_timeout=-1),
                        dict(devices={"2": -1, "3": 0}), dict(empty_producers=[0]),
+                       dict(expected_child_prefix=[]), dict(expected_child_prefix="  "),
                        dict(fault={"rank": 0, "kind": "crash"})):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.configure(**change)
@@ -169,7 +171,32 @@ class ProbeTests(unittest.TestCase):
                                 env=dict(os.environ, PMI_RANK="0"), capture_output=True, text=True, timeout=10)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("outside MPI", result.stderr)
+        self.assertIn("PMI_RANK=0", result.stderr)
         self.assertFalse((self.root / "out").exists())
+
+    def test_late_cancellation_removes_success_marker(self):
+        from glint_probe_common import atomic_json
+        output = self.root / "out"
+
+        def started(*_args, **_kwargs):
+            atomic_json(output / "mpi-complete.json", dict(status="complete", ranks=[{}, {}, {}, {}]))
+            process = Mock()
+            process.wait.return_value = 0
+            return process
+
+        def interrupted_after_rename(path, value):
+            atomic_json(path, value)
+            if path.name == "complete.json":
+                raise InterruptedError("cancelled immediately after success rename")
+
+        with patch("glint_psana.subprocess.Popen", side_effect=started), \
+             patch("glint_psana.stop_launcher"), \
+             patch("glint_psana.atomic_json", side_effect=interrupted_after_rename), \
+             patch.dict(os.environ, {}, clear=True):
+            code = launcher_main(["--config", str(self.config_path), "--output", str(output), "--", "true"])
+        self.assertEqual(code, 1)
+        self.assertFalse((output / "complete.json").exists())
+        self.assertTrue((output / "failed.json").exists())
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "parent-death guard is Linux-specific")
     def test_child_dies_when_initialized_parent_is_killed(self):

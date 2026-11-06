@@ -25,10 +25,14 @@ launcher, so `mpirun` and mpi4py must use the same MPI installation.
 
 The S3DF example activates the GLINT prefix directly, avoiding an intermediate
 default environment. Its CuPy build requires CUDA-12 NVRTC, while that GLINT
-prefix contains CUDA-11 compiler libraries. The example explicitly selects
-the available CUDA-12 toolkit from the psana prefix for CUDA compilation;
-Python packages still come from the GLINT environment. Replace this toolkit
-path with your site's compatible CUDA installation. An echo/placement check
+prefix contains CUDA-11 compiler libraries. The child explicitly loads CUDA
+libraries and headers from the psana prefix's `targets/x86_64-linux` toolkit
+subtree. Its loader path includes that CUDA-only library directory and the
+GLINT prefix's library directory; it does not prepend the entire psana `lib`
+directory or append the parent's loader path. Python packages still come from
+the GLINT environment. Both parent and child report `CUDA_PATH` and
+`LD_LIBRARY_PATH`. Replace this toolkit path with your site's compatible CUDA
+installation. An echo/placement check
 alone does not establish that GLINT's compiled kernels can run: test `index` too.
 
 Within a single-node allocation with two non-MIG GPUs and sufficient CPU slots
@@ -40,7 +44,10 @@ python3 experiments/xtc_bridge/glint-psana \
   -- mpirun -n 4
 ```
 
-The launcher must run once, outside MPI ranks. The MPI command is supplied as
+The launcher must run once from a batch script or an `salloc` shell, outside
+MPI ranks and numbered `srun` steps. An interactive `srun --pty bash` shell is
+already a step and is deliberately refused; its inherited rank/step variables
+are included in the error message. The MPI command is supplied as
 arguments after `--`; it can instead be a verified `srun` recipe. The output
 directory must be new and readable by all ranks on the single probe node.
 Do not run the harness on a login node. Scheduler/account/resource options are
@@ -80,8 +87,12 @@ Repeat the allocated-node run with these overrides in separate configurations:
 | Child crash | `"fault": {"rank": 2, "kind": "crash"}` | Socket failure fails MPI |
 | Slow child | `"fault": {"rank": 2, "kind": "timeout"}` | Finite call deadline fails MPI |
 
-Set shorter activation/call deadlines for fault tests; the overall job deadline
-must allow startup, useful work and cleanup. A failed rank aborts MPI instead
+Set shorter activation/call deadlines for fault tests. Each producer has one
+activation and two bridge calls (initialize and consume). The default 600-second
+overall budget exceeds their 120 + 120 + 120-second inner limits and leaves
+room for the outer environment/MPI startup and cleanup. The overall deadline
+is independent and can intentionally be tighter in a fault test; for normal
+runs size it for all these phases. A failed rank aborts MPI instead
 of waiting on a success-only collective. Normal errors close/reap its child.
 After initialization, the Linux child installs a parent-death SIGKILL guard,
 including while it is busy in a call. Before that handshake, envbridge's

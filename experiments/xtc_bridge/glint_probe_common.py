@@ -16,7 +16,7 @@ def load_config(path):
     config = json.loads(Path(path).read_text())
     defaults = dict(mode="echo", check_gpu=False, devices={"2": 0, "3": 1},
                     empty_producers=[], fault=None, activation_timeout=120.0,
-                    call_timeout=120.0, job_timeout=300.0, allow_same_environment=False)
+                    call_timeout=120.0, job_timeout=600.0, allow_same_environment=False)
     allowed = set(defaults) | {"psana_prelude", "glint_prelude", "expected_child_prefix"}
     if not isinstance(config, dict) or set(config) - allowed:
         raise ValueError("unknown probe configuration fields")
@@ -31,6 +31,9 @@ def load_config(path):
     for key in ("check_gpu", "allow_same_environment"):
         if type(config[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
+    prefix = config.get("expected_child_prefix")
+    if prefix is not None and (not isinstance(prefix, str) or not prefix.strip()):
+        raise ValueError("expected_child_prefix must be a nonempty string or null")
     if config["mode"] not in ("echo", "index"):
         raise ValueError("mode must be echo or index")
     if config["mode"] == "index" and not config["check_gpu"]:
@@ -57,7 +60,9 @@ def atomic_json(path, value):
 def identity():
     return dict(pid=os.getpid(), host=socket.gethostname(), executable=sys.executable,
                 prefix=sys.prefix, python=sys.version.split()[0],
-                cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"))
+                cuda_visible_devices=os.environ.get("CUDA_VISIBLE_DEVICES"),
+                cuda_path=os.environ.get("CUDA_PATH"),
+                ld_library_path=os.environ.get("LD_LIBRARY_PATH"))
 
 
 def gpu_identity(ordinal):
