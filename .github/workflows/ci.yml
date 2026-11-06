@@ -604,6 +604,11 @@ jobs:
         run: python test_cpu_records.py
         working-directory: experiments/xtc_bridge
 
+      - name: experiments/xtc_bridge/test_native_psana_pipeline.py
+        if: ${{ !cancelled() }}
+        run: python test_native_psana_pipeline.py
+        working-directory: experiments/xtc_bridge
+
       - name: experiments/xtc_bridge/test_geom_manifest.py
         if: ${{ !cancelled() }}
         run: python test_geom_manifest.py

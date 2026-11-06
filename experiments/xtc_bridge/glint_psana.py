@@ -13,10 +13,11 @@ import sys
 from glint_probe_common import atomic_json, load_config
 
 
-def launch_command(config, config_path, output, launcher):
+def launch_command(config, config_path, output, launcher, mode="probe"):
     if not launcher:
         raise ValueError("provide an MPI launcher after --")
-    probe = Path(__file__).resolve().with_name("probe_psana_glint.py")
+    probe = Path(__file__).resolve().with_name(
+        "psana_mpi_producer.py" if mode == "cpu" else "probe_psana_glint.py")
     command = [*launcher, "python", str(probe), "--config", str(config_path), "--output", str(output)]
     return ["bash", "-c", config["psana_prelude"] + " && exec " + shlex.join(command)]
 
@@ -51,7 +52,8 @@ def inside_rank(environ):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="glint-psana stage-1 MPI launch probe; no XTC reads")
+    parser = argparse.ArgumentParser(description="glint-psana: launch probe or native psana MPI CPU path")
+    parser.add_argument("--mode", choices=("probe", "cpu"), default="probe")
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path, help="new directory on the probe node's shared filesystem")
     parser.add_argument("launcher", nargs=argparse.REMAINDER, help="-- mpirun -n 4 (or verified srun arguments)")
@@ -65,11 +67,15 @@ def main(argv=None):
             detected = ", ".join(f"{key}={os.environ[key]}" for key in keys if key in os.environ)
             raise ValueError("glint-psana must run outside MPI ranks and srun steps; "
                              "launch once from the batch script or an salloc shell. Detected: " + detected)
-        config = load_config(args.config)
+        if args.mode == "cpu":
+            from psana_cpu_config import load_config as load_cpu_config
+            config = load_cpu_config(args.config)
+        else:
+            config = load_config(args.config)
         launcher = args.launcher[1:] if args.launcher[:1] == ["--"] else args.launcher
         destination = args.output.resolve()
         config_path = destination / "config.json"
-        command = launch_command(config, config_path, destination, launcher)
+        command = launch_command(config, config_path, destination, launcher, args.mode)
         destination.mkdir(parents=True, exist_ok=False)
         output = destination
         atomic_json(config_path, config)
@@ -82,8 +88,11 @@ def main(argv=None):
         report = json.loads((output / "mpi-complete.json").read_text())
         if report.get("status") != "complete" or len(report.get("ranks", [])) != 4:
             raise ValueError("missing valid MPI completion report")
+        if args.mode == "cpu" and (report.get("mode") != "cpu" or report.get("harness") is not False
+                                   or not (output / "merged.stream").is_file()):
+            raise ValueError("missing native CPU completion/output")
         atomic_json(output / "complete.json", report)
-        print(f"GLINT_PSANA_PROBE_OK {output / 'complete.json'}", flush=True)
+        print(f"GLINT_PSANA_{args.mode.upper()}_OK {output / 'complete.json'}", flush=True)
         return 0
     except (Exception, KeyboardInterrupt) as exc:
         # Ignore repeated cancellation while reaping the owned launcher.

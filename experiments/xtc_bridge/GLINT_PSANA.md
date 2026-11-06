@@ -227,3 +227,129 @@ below-threshold results, sampled intensities, independent producer/group counts,
 exact timestamp serialization, existing wire-codec round trips and group gates.
 They do not exercise real psana calibration or the V4 CUDA kernel; real-data
 scientific equivalence and native MPI no-duplication remain later acceptance gates.
+
+## Stage 3: native psana MPI CPU path
+
+Select `--mode cpu` to run the real two-phase path. The default `--mode probe`
+retains Stage 1 behavior. Use exactly four ranks on one node; actual roles come
+from `DataSource.comms.node_type()`, with one SMD0, one EB and two BDs. The
+`devices` mapping must match those BD world ranks. Only BDs initialize CuPy or
+start ordinary GLINT children, and their physical GPUs must differ.
+
+```text
+glint-psana --mode cpu
+  -> activate psana environment -> one mpirun/srun
+     -> psana_mpi_producer.produce
+        -> native DataSource.runs / Run.events on EVERY rank
+        -> BD: reference timestamp -> global ordinal
+             -> CpuEventProcessor -> qspool.RecordWriter
+        -> exhaust events/runs, release run resources, finalize producer manifest
+     -> completion gate: full reference identity, ownership and group budgets
+     -> BD: envbridge child -> glint_qconsumer.index_group
+             -> qrecords.to_legacy -> existing index_and_write
+     -> verify/reap children, validate ALL group files, merge stream atomically
+  -> successful MPI exit -> complete.json
+```
+
+The initial contract is one offline run and a frozen, strictly increasing
+**prefix** of its timestamps. Build this baseline once, separately from the
+measured MPI execution, in the psana environment and outside MPI:
+
+```bash
+python experiments/xtc_bridge/freeze_psana_reference.py \
+  --exp mfx100848724 --run 51 --dir /sdf/data/lcls/ds/prj/public01/xtc \
+  --max-events 8 --output /shared/reference.json
+```
+
+This utility writes every event timestamp, including events that later produce
+no hit. It does not peak-find or index. The reference also hashes the detector's
+calibration values (including geometry and masks, excluding database metadata).
+Each BD verifies its actual constants against that hash before processing.
+Timestamp jumps/duplicates and shorter-than-requested prefixes are rejected.
+The supplied detector/run layout must still be scientifically validated before
+acceptance; a transport smoke test is not geometry or indexing parity evidence.
+
+Copy `glint_psana_cpu.example.json`, verify the site activation commands and
+reference path, then launch once from the batch script or allocation shell:
+
+```bash
+python experiments/xtc_bridge/glint-psana --mode cpu \
+  --config /shared/cpu.json --output /shared/new-cpu-output -- mpirun -n 4
+```
+
+The outer launcher freezes the reference contents inside `config.json`.
+`source.max_events` is a positive native psana delivery guard, at least the
+reference length; it is not assumed to select exactly the serial prefix.
+Every delivered in-range timestamp must appear once in the reference mapping.
+Unexpected in-range timestamps, duplicate ownership and missing events fail the
+job, even when the hit count happens to match. Out-of-range timestamps are
+recorded separately and receive no calibration or peak finding. The audit is
+bounded to four times the configured event guard; exceeding it fails explicitly.
+There is no additional modulo rejection in the event loop.
+
+All ranks exhaust the native lifecycle. Where psana exposes
+`Run.close_shared_memory`, every rank invokes it after its event loop; older
+releases without shared run windows expose no such hook. Run/DataSource
+references are released before producer manifests and the application
+completion collective. BDs then synchronize their selected GPU and release
+unused CuPy device/pinned pool blocks before starting the child; the CUDA
+context and any still-live allocations remain. Only afterward do GLINT children start. Children reuse
+Stage 1's environment/GPU checks and parent-death protection through
+`glint_probe_worker.initialize`; they never import psana or mpi4py.
+
+The native entry point sets `PS_PARALLEL=mpi`, `PS_EB_NODES=1`,
+`PS_EB_NODE_LOCAL=0`, and `PS_SRV_NODES=0` before importing psana. Site/experiment
+psana defaults can still affect batching, so reported roles and delivered event
+identity are checked at runtime. MPI and mpi4py must come from the same activated
+parent environment. As in Stage 1, scheduler containment is required during the
+child activation window; `job_timeout` bounds the overall launcher.
+
+`qspool.RecordWriter` writes byte-bounded chunks of concatenated numeric q/peak
+arrays, offsets and JSON metadata, with pickle disabled. Files are renamed only
+after close; a final per-producer manifest lists chunk hashes and counts. Idle
+BDs also produce manifests. Rank 0 scans compact chunks to check the complete
+reference, without gathering detector images or q arrays through MPI. Each
+consumer owner subsequently loads its complete groups from all producer spools.
+Group ownership is round-robin over actual BD ranks; group count is independent
+of BD count. A group is indexed in one call, ordered by reference ordinal.
+
+`max_chunk_bytes` and `max_group_bytes` cap compact payload. The configuration
+also requires `transport_memory_bytes >= 6*max_group_bytes + 2*max_chunk_bytes`
+as a conservative allowance for group arrays, wire copies and chunk loading.
+This is a reservation/check, not an OS RSS limit: reserve additional memory for
+Python objects, psana calibration, detector frames and GLINT/CUDA workspaces.
+Consumed rows are detached from chunk backing arrays so a small group does not
+retain unrelated large chunks. Oversized records/groups fail rather than
+changing consensus grouping. Production record chunks are separate from Stage
+2's single-record replay helpers.
+
+Integration is rejected by configuration and at the child boundary. The child
+constructs an explicit indexing argument allowlist with `integrate=False`.
+Group output hashes, sizes, identities and child acknowledgements must match
+before merging; the legacy concatenator is called only after every file is
+validated. Empty groups produce valid header-only streams. `merged.stream` and
+`mpi-complete.json` precede the outer launcher's final `complete.json`. A failure
+retains diagnostic artifacts and cannot create final success.
+
+The Stage-2 nonfinite-intensity follow-up is resolved for this CPU reference:
+**retain explicit failure on any nonfinite q/peak output**, with an error report
+and MPI abort. Do not silently drop rows or turn a processing error into a
+non-hit. This intentionally differs from the legacy reader's unchecked sampled
+intensity behavior; any future skip/filter policy requires its own science
+comparison. Calibration/finder exceptions likewise fail the application.
+
+Additional modules:
+
+- `psana_reference.py`: exact prefix identities and calibration-value hashing.
+- `psana_cpu_config.py`: native-mode configuration and resource validation.
+- `qspool.py`: bounded chunks, integrity checks, completion gate and group loading.
+- `psana_mpi_producer.py`: native role/lifecycle orchestration and output finalization.
+- `glint_qconsumer.py`: ordinary GLINT child and complete-group indexing adapter.
+- `freeze_psana_reference.py`: explicit baseline manifest utility.
+- `test_native_psana_pipeline.py`: CPU orchestration, ownership, storage and boundary tests.
+
+Run the new CPU suite with `python experiments/xtc_bridge/test_native_psana_pipeline.py`.
+Native MPI progress, real calibration/V4 GPU processing, cross-environment child
+execution and failure cleanup require a separate bounded allocated-node smoke
+run. Stage 4 adds the full frozen scientific comparison across batching and
+worker assignments; Stage 3 does not claim that acceptance result.
