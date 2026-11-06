@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -88,9 +89,19 @@ def main(argv=None):
         report = json.loads((output / "mpi-complete.json").read_text())
         if report.get("status") != "complete" or len(report.get("ranks", [])) != 4:
             raise ValueError("missing valid MPI completion report")
-        if args.mode == "cpu" and (report.get("mode") != "cpu" or report.get("harness") is not False
-                                   or not (output / "merged.stream").is_file()):
-            raise ValueError("missing native CPU completion/output")
+        if args.mode == "cpu":
+            merged = output / "merged.stream"
+            if report.get("mode") != "cpu" or report.get("harness") is not False or not merged.is_file():
+                raise ValueError("missing native CPU completion/output")
+            digest = hashlib.sha256()
+            with merged.open('rb') as stream:
+                for block in iter(lambda: stream.read(1024*1024), b''):
+                    digest.update(block)
+            expected = report.get('merged', {})
+            if (expected.get('output') != str(merged) or
+                    expected.get('output_bytes') != merged.stat().st_size or
+                    expected.get('sha256') != digest.hexdigest()):
+                raise ValueError("merged stream differs from MPI completion report")
         atomic_json(output / "complete.json", report)
         print(f"GLINT_PSANA_{args.mode.upper()}_OK {output / 'complete.json'}", flush=True)
         return 0

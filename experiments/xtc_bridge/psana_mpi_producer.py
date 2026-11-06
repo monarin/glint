@@ -143,6 +143,7 @@ def consume(config, output, parent, bds, summaries, gate, worker_factory=Worker)
 
 def finalize(output, reports, gate, num_groups):
     groups={}
+    expected_chunks=0
     bds=sorted(r['rank'] for r in reports if r['role']=='bd')
     for report in reports:
         if not report['child_reaped'] or (report['role']=='bd')!=(report['child'] is not None):
@@ -157,17 +158,21 @@ def finalize(output, reports, gate, num_groups):
                     file_digest(path)!=result['sha256']):
                 raise ValueError('missing or changed group output')
             groups[group]=path
+            expected_chunks+=result['n_frames']
     if set(groups)!=set(range(num_groups)):
         raise ValueError('missing group output')
     # This module imports only stdlib at top level; no legacy reader/placement runs.
     from glint_xtc_mpi import concat_streams
     temporary=output/'merged.stream.tmp'
     count=concat_streams([groups[g] for g in range(num_groups)],temporary)
+    if count!=expected_chunks:
+        raise ValueError('merged stream chunk count differs from acknowledged frames')
     if not temporary.stat().st_size:
         raise ValueError('empty merged stream')
     destination=output/'merged.stream'
     os.replace(temporary,destination)
-    return dict(output=str(destination),sha256=file_digest(destination),chunks=count)
+    return dict(output=str(destination),sha256=file_digest(destination),
+                output_bytes=destination.stat().st_size,chunks=count)
 
 
 def interrupted(signum, _frame):

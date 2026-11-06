@@ -56,7 +56,9 @@ class Reference:
 
     def ordinal(self, stamp):
         integer(stamp, 'timestamp', maximum=2**64-1)
-        if stamp < self.low or stamp > self.high:
+        if stamp < self.low:
+            raise ValueError(f'timestamp precedes frozen prefix: {stamp}')
+        if stamp > self.high:
             return None
         if stamp not in self.ordinals:
             raise ValueError(f'unexpected in-range timestamp {stamp}')

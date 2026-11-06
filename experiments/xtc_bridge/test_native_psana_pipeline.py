@@ -2,11 +2,12 @@
 import copy
 import json
 import os
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import numpy as np
 import qrecords as qr
 import qspool
@@ -14,7 +15,7 @@ import psana_mpi_producer as pipeline
 import glint_qconsumer as consumer
 from psana_reference import Reference, calibration_digest, event_timestamp
 from psana_cpu_config import load_config
-from glint_psana import launch_command
+from glint_psana import launch_command, main as launcher_main
 
 CONSTANTS={'geometry':('geometry',{}),'pixel_status':(np.zeros((1,2,2),np.uint16),{})}
 
@@ -59,7 +60,7 @@ class PipelineTests(unittest.TestCase):
     def test_reference_exact_mapping_and_rejection(self):
         r=Reference(reference())
         self.assertEqual(r.ordinal(120),2)
-        self.assertIsNone(r.ordinal(99))
+        with self.assertRaisesRegex(ValueError,'precedes frozen prefix'): r.ordinal(99)
         self.assertIsNone(r.ordinal(131))
         with self.assertRaises(ValueError): r.ordinal(115)
         for stamps in ([100,100],[110,100],[],[100,1.5]):
@@ -113,7 +114,7 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'one event'): w.append(record(0))
 
     def test_completion_gate_and_groups_independent_of_bd_count(self):
-        a=self.spool([record(0),record(2,status='invalid_wavelength')],audit=[99])
+        a=self.spool([record(0),record(2,status='invalid_wavelength')],audit=[141])
         b=self.spool([record(3,3),record(1,3,status='missing_calibration')],rank=3,audit=[140])
         gate=qspool.validate_spools(self.root,[a,b],Reference(reference()),self.c)
         self.assertEqual(gate['count'],4)
@@ -126,6 +127,9 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(out['events'],[0,3])
         with self.assertRaisesRegex(ValueError,'max_group_bytes'):
             qspool.validate_spools(self.root,[a,b],Reference(reference()),dict(self.c,max_group_bytes=1))
+        bad=copy.deepcopy(a);bad['out_of_range']=[99]
+        with self.assertRaisesRegex(ValueError,'precedes frozen prefix'):
+            qspool.validate_spools(self.root,[bad,b],Reference(reference()),self.c)
         bad=copy.deepcopy(a);bad['out_of_range']=[110]
         with self.assertRaisesRegex(ValueError,'incorrectly excluded'):
             qspool.validate_spools(self.root,[bad,b],Reference(reference()),self.c)
@@ -193,9 +197,9 @@ class PipelineTests(unittest.TestCase):
         return result,order
 
     def test_native_lifecycle_ownership_and_out_of_range_without_calibration(self):
-        (parent,bds,summary),order=self.fake_produce(2,[90,100,120,140])
+        (parent,bds,summary),order=self.fake_produce(2,[100,120,140])
         self.assertEqual([x for x in order if isinstance(x,tuple)],[('process',100,0),('process',120,2)])
-        self.assertEqual(summary['out_of_range'],[90,140])
+        self.assertEqual(summary['out_of_range'],[140])
         self.assertEqual(summary['count'],2)
         self.assertEqual(bds,[2,3])
 
@@ -294,13 +298,78 @@ class PipelineTests(unittest.TestCase):
             path=self.root/f'group-{g}.stream'
             path.write_text('CrystFEL stream format 2.3\n'+('----- Begin chunk -----\nx\n----- End chunk -----\n' if g==1 else ''))
             reports[2+g%2]['groups'].append(dict(group=g,output=str(path),config_digest='a'*64,
-                output_bytes=path.stat().st_size,sha256=qspool.file_digest(path)))
+                output_bytes=path.stat().st_size,sha256=qspool.file_digest(path),n_frames=int(g==1)))
         merged=pipeline.finalize(self.root,reports,{'config_digest':'a'*64},3)
         self.assertEqual(merged['chunks'],1)
         self.assertEqual((self.root/'merged.stream').read_text().count('CrystFEL stream'),1)
+        with patch('glint_xtc_mpi.concat_streams',return_value=0):
+            with self.assertRaisesRegex(ValueError,'chunk count'):
+                pipeline.finalize(self.root,reports,{'config_digest':'a'*64},3)
         (self.root/'group-2.stream').unlink()
         with self.assertRaisesRegex(ValueError,'missing or changed'):
             pipeline.finalize(self.root,reports,{'config_digest':'a'*64},3)
+
+
+    def test_outer_cpu_completion_checks_merged_output(self):
+        config_path=self.root/'config.json'
+        config_path.write_text(json.dumps(self.c))
+        for fault in (None,'size','digest','mode','missing'):
+            output=self.root/str(fault)
+            def started(*args,**kwargs):
+                stream=output/'merged.stream'
+                stream.write_text('CrystFEL stream format 2.3\n')
+                merged=dict(output=str(stream),output_bytes=stream.stat().st_size,
+                            sha256=qspool.file_digest(stream))
+                if fault=='size': merged['output_bytes']+=1
+                if fault=='digest': merged['sha256']='0'*64
+                if fault=='missing': stream.unlink()
+                (output/'mpi-complete.json').write_text(json.dumps(dict(
+                    status='complete',ranks=[{}]*4,mode='probe' if fault=='mode' else 'cpu',
+                    harness=False,merged=merged)))
+                return Mock(wait=Mock(return_value=0))
+            with patch('glint_psana.subprocess.Popen',side_effect=started), \
+                 patch('glint_psana.stop_launcher'),patch.dict(os.environ,{},clear=True):
+                code=launcher_main(['--mode','cpu','--config',str(config_path),
+                                    '--output',str(output),'--','true'])
+            self.assertEqual(code,0 if fault is None else 1)
+            self.assertEqual((output/'complete.json').exists(),fault is None)
+            self.assertEqual((output/'failed.json').exists(),fault is not None)
+
+    def test_main_completion_and_abort_artifacts(self):
+        config_path=self.root/'config.json'
+        config_path.write_text(json.dumps(self.c))
+        for fail in (False,True):
+            output=self.root/str(fail);output.mkdir()
+            comm=Mock()
+            comm.Get_rank.return_value=0;comm.Get_size.return_value=4
+            comm.allgather.return_value=[None,None,{'rank':2},{'rank':3}]
+            comm.gather.return_value=[{'rank':i} for i in range(4)]
+            comm.bcast.side_effect=lambda value,root:value
+            mpi=SimpleNamespace(COMM_WORLD=comm,Get_library_version=lambda:'test MPI')
+            gate=dict(count=4,config_digest='a'*64)
+            with patch.dict(sys.modules,{'mpi4py':SimpleNamespace(MPI=mpi),
+                                         'psana':SimpleNamespace(DataSource=Mock())}), \
+                 patch.object(pipeline.signal,'signal'), \
+                 patch.object(pipeline,'produce',return_value=({'rank':0},[2,3],None)), \
+                 patch.object(pipeline,'validate_spools',side_effect=ValueError('missing expected events') if fail else None,
+                              return_value=gate), \
+                 patch.object(pipeline,'consume') as consume, \
+                 patch.object(pipeline,'finalize',return_value={'chunks':2}) as finalize, \
+                 patch.dict(os.environ,{},clear=True):
+                code=pipeline.main(['--config',str(config_path),'--output',str(output)])
+            self.assertEqual(code,int(fail))
+            self.assertEqual((output/'mpi-complete.json').exists(),not fail)
+            if fail:
+                comm.Abort.assert_called_once_with(1)
+                consume.assert_not_called();finalize.assert_not_called()
+                error=json.loads((output/'rank-0-failed.json').read_text())['error']
+                self.assertIn('missing expected events',error)
+                comm.bcast.assert_not_called();comm.Barrier.assert_not_called()
+            else:
+                comm.Abort.assert_not_called();comm.Barrier.assert_called_once()
+                report=json.loads((output/'mpi-complete.json').read_text())
+                self.assertEqual(report['production'],gate)
+                self.assertFalse(report['harness'])
 
 
 if __name__=='__main__':

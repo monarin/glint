@@ -1,7 +1,7 @@
-# glint-psana: stage-1 launch probe
+# glint-psana: launch probe and native CPU path
 
-`glint-psana` is an optional, checkout-local workflow entry point. This first
-stage tests one MPI application in a psana environment calling ordinary GLINT
+`glint-psana` is an optional, checkout-local workflow entry point. The default
+`--mode probe` tests one MPI application in a psana environment calling ordinary GLINT
 children through the existing envbridge. It does not open XTC, instantiate
 DataSource, calibrate detector data, or prove native psana event ownership.
 Existing GLINT commands and envbridge are unchanged.
@@ -282,8 +282,9 @@ The outer launcher freezes the reference contents inside `config.json`.
 reference length; it is not assumed to select exactly the serial prefix.
 Every delivered in-range timestamp must appear once in the reference mapping.
 Unexpected in-range timestamps, duplicate ownership and missing events fail the
-job, even when the hit count happens to match. Out-of-range timestamps are
-recorded separately and receive no calibration or peak finding. The audit is
+job, even when the hit count happens to match. Timestamps before the first
+reference event fail because the reference must be a prefix. Timestamps after
+the last reference event are audited and receive no calibration or peak finding. The audit is
 bounded to four times the configured event guard; exceeding it fails explicitly.
 There is no additional modulo rejection in the event loop.
 
@@ -301,7 +302,13 @@ The native entry point sets `PS_PARALLEL=mpi`, `PS_EB_NODES=1`,
 `PS_EB_NODE_LOCAL=0`, and `PS_SRV_NODES=0` before importing psana. Site/experiment
 psana defaults can still affect batching, so reported roles and delivered event
 identity are checked at runtime. MPI and mpi4py must come from the same activated
-parent environment. As in Stage 1, scheduler containment is required during the
+parent environment. The example clears the Python 3.9 `PYTHONPATH` exported
+by the site activation script after selecting the installed Python 3.11 psana
+environment. A custom checkout may instead require its own matching path;
+never carry a different Python ABI into the MPI ranks. The example selects the
+SLAC `https://pswww.slac.stanford.edu/ws/calib_ws/` calibration read endpoint
+with `LCLS_CALIB_HTTP`; TLS verification remains enabled. Use the same endpoint
+when freezing the reference. As in Stage 1, scheduler containment is required during the
 child activation window; `job_timeout` bounds the overall launcher.
 
 `qspool.RecordWriter` writes byte-bounded chunks of concatenated numeric q/peak
@@ -310,13 +317,16 @@ after close; a final per-producer manifest lists chunk hashes and counts. Idle
 BDs also produce manifests. Rank 0 scans compact chunks to check the complete
 reference, without gathering detector images or q arrays through MPI. Each
 consumer owner subsequently loads its complete groups from all producer spools.
+Each group currently rescans and verifies all spool chunks, so total read/hash
+work scales with group count times spool size. A group-to-chunk index is deferred.
 Group ownership is round-robin over actual BD ranks; group count is independent
 of BD count. A group is indexed in one call, ordered by reference ordinal.
 
 `max_chunk_bytes` and `max_group_bytes` cap compact payload. The configuration
 also requires `transport_memory_bytes >= 6*max_group_bytes + 2*max_chunk_bytes`
 as a conservative allowance for group arrays, wire copies and chunk loading.
-This is a reservation/check, not an OS RSS limit: reserve additional memory for
+This is only a configuration arithmetic check; runtime does not consult
+`transport_memory_bytes`, and it is not an OS RSS limit. Reserve additional memory for
 Python objects, psana calibration, detector frames and GLINT/CUDA workspaces.
 Consumed rows are detached from chunk backing arrays so a small group does not
 retain unrelated large chunks. Oversized records/groups fail rather than
