@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Experimental checkout-local launcher; not an installed console entry point yet."""
+from glint_psana import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
