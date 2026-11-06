@@ -599,6 +599,11 @@ jobs:
         run: python test_glint_psana_probe.py
         working-directory: experiments/xtc_bridge
 
+      - name: experiments/xtc_bridge/test_cpu_records.py
+        if: ${{ !cancelled() }}
+        run: python test_cpu_records.py
+        working-directory: experiments/xtc_bridge
+
       - name: experiments/xtc_bridge/test_geom_manifest.py
         if: ${{ !cancelled() }}
         run: python test_geom_manifest.py
