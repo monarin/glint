@@ -1,0 +1,11 @@
+{
+  "psana_prelude": "source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh && conda activate xpp_drp_gpu_311",
+  "glint_prelude": "source /sdf/group/lcls/ds/ana/sw/conda1-v4/inst/etc/profile.d/conda.sh && conda activate /sdf/group/lcls/ds/ana/sw/conda1/inst/envs/ana-4.0.58-py3-minipytorch && export CUDA_PATH=/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/xpp_drp_gpu_311/targets/x86_64-linux && export LD_LIBRARY_PATH=\"$CUDA_PATH/lib:$CONDA_PREFIX/lib\"",
+  "expected_child_prefix": "/sdf/group/lcls/ds/ana/sw/conda1/inst/envs/ana-4.0.58-py3-minipytorch",
+  "mode": "echo",
+  "check_gpu": true,
+  "devices": {"2": 0, "3": 1},
+  "activation_timeout": 120,
+  "call_timeout": 120,
+  "job_timeout": 600
+}

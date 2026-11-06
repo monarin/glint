@@ -594,6 +594,11 @@ jobs:
         run: python test_envbridge_local.py
         working-directory: experiments/xtc_bridge
 
+      - name: experiments/xtc_bridge/test_glint_psana_probe.py
+        if: ${{ !cancelled() }}
+        run: python test_glint_psana_probe.py
+        working-directory: experiments/xtc_bridge
+
       - name: experiments/xtc_bridge/test_geom_manifest.py
         if: ${{ !cancelled() }}
         run: python test_geom_manifest.py
