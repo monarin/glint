@@ -65,6 +65,12 @@ def main(argv=None):
         atomic_json(root/'commands.json',commands)
         if code: raise RuntimeError(f'{name} exited {code}; see {name}.log')
     try:
+        gpu_check=("import sys,json; sys.path.insert(0,"+repr(str(bridge))+"); "
+                   "from glint_probe_common import gpu_identity; import cupy as cp; "
+                   "devices=[gpu_identity(i) for i in range(2)]; "
+                   "assert len({d['pci'] for d in devices})==2; "
+                   "print(json.dumps(devices),flush=True)")
+        launch('gpu-check',['python','-c',gpu_check],raw['psana_prelude'])
         launch('freeze',['python',str(bridge/'freeze_psana_reference.py'),'--exp',source['exp'],
             '--run',str(source['run']),'--dir',source['dir'],'--det',raw['processor']['det'],
             '--max-events',str(source['max_events']),'--output',str(reference)],raw['psana_prelude'])

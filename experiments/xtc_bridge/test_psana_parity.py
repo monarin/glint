@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 from psana_parity_audit import Audit, frame_digest
 from psana_parity_compare import (calibration_map, compare_records, compare_streams,
-                                  equivalent_basis, read_overlap, science_config)
+                                  equivalent_basis, read_overlap, science_config, compare)
 from psana_reference import Reference, calibration_digest
 from qrecords import validate_record
 
@@ -105,6 +105,62 @@ class ParityTests(unittest.TestCase):
         b=copy.deepcopy(c);b['source']['batch_size']=5;b['devices']={'2':1,'3':0}
         self.assertEqual(science_config(c),science_config(b))
         b['source']['max_events']=14;self.assertNotEqual(science_config(c),science_config(b))
+
+
+    def test_full_artifact_comparison_and_corruption(self):
+        from qspool import RecordWriter,validate_spools,file_digest
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);base=root/'baseline';native=root/'native';base.mkdir();native.mkdir()
+            ref=dict(schema_version=1,experiment='exp',run=1,calibration_digest='a'*64,
+                     timestamps=[2**63+i for i in range(4)])
+            c=dict(reference=ref,processor={},geometry_digest=None,num_groups=3,cell=None,nbest=1,
+                source=dict(exp='exp',run=1,dir='/tmp',max_events=4,batch_size=1),
+                psana_prelude='psana',glint_prelude='glint',expected_child_prefix='/glint',
+                max_chunk_bytes=10000,max_group_bytes=100000,devices={'2':0,'3':1})
+            def write(path,value): path.write_text(json.dumps(value))
+            for d in (base,native): write(d/'config.json',c)
+            rows=[record(i) for i in range(4)]
+            frame=frame_digest(np.ones((1,2,3)))
+            def audit(selected,seen):
+                return dict(seen=seen,calibrations=[dict(timestamp=r['timestamp'],frame=frame) for r in selected],
+                    physical_segments=[[0]],calibration_digests=['a'*64],reads=[],seconds={},max_rss_kib=1)
+            def stream(path,selected):
+                path.write_text('frozen stream '+str([r['source_ordinal'] for r in selected]))
+                write(Path(str(path)+'.index.json'),dict(
+                    frames=[dict(event=r['source_ordinal'],indexed=True,M=np.diag([79.,79.,38.]).tolist()) for r in selected],
+                    seed=0,torch='test',numpy='test',matmul_precision='highest',tf32=False,
+                    xtc_python_open_guard=True,mpi_imported=False,psana_imported=False))
+            for g in range(3):
+                d=base/f'group-{g}';d.mkdir();selected=[r for r in rows if r['group_id']==g]
+                w=RecordWriter(d/f'producer-{g}',g,'a'*64,10000)
+                for r in selected:w.append(dict(r,producer_rank=g))
+                w.finish([]);stream(d/f'group-{g}.stream',selected)
+                write(d/'baseline-complete.json',dict(group=g,child_reaped=True))
+                write(d/f'audit-{g}.json',audit(selected,ref['timestamps']))
+            reports=[];summaries=[]
+            for rank,role in enumerate(('smd0','eb','bd','bd')):
+                selected=[] if rank<2 else [r for r in rows if r['source_ordinal']%2==rank-2]
+                if rank>=2:
+                    w=RecordWriter(native/f'producer-{rank}',rank,'a'*64,10000)
+                    for r in selected:w.append(dict(r,producer_rank=rank))
+                    summaries.append(w.finish([]))
+                write(native/f'audit-{rank}.json',audit(selected,[r['timestamp'] for r in selected]))
+                reports.append(dict(rank=rank,role=role,child=None if rank<2 else {},child_reaped=True,groups=[]))
+            for g in range(3):
+                path=native/f'group-{g}.stream';stream(path,[r for r in rows if r['group_id']==g])
+                reports[2+g%2]['groups'].append(dict(group=g,sha256=file_digest(path),output_bytes=path.stat().st_size))
+            merged=native/'merged.stream';merged.write_text('merged fixture')
+            gate=validate_spools(native,summaries,Reference(ref),c)
+            write(native/'mpi-complete.json',dict(status='complete',harness=False,production=gate,ranks=reports,
+                merged=dict(sha256=file_digest(merged),output_bytes=merged.stat().st_size)))
+            result=compare(base,native)
+            self.assertTrue(result['parity_pass']);self.assertEqual(result['indexed_events'],[0,1,2,3])
+            self.assertEqual(result['calibration_attempts'],dict(baseline=4,native=4))
+            path=native/'audit-2.json';good=path.read_text();bad=json.loads(good)
+            bad['calibrations'][0]['frame']['sha256']='b'*64;write(path,bad)
+            with self.assertRaisesRegex(ValueError,'image diagnostics'): compare(base,native)
+            path.write_text(good);merged.write_text('corrupted')
+            with self.assertRaisesRegex(ValueError,'merged stream changed'): compare(base,native)
 
 
 if __name__=='__main__': unittest.main(verbosity=2)
