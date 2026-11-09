@@ -4,7 +4,9 @@ The complete acceptance matrix passed on a fixed 1,003-event prefix of
 `mfx100848724` run 51. All three native cases reproduce the independent serial
 reference, including three frames passing the unchanged strict indexing gate.
 The coordinator produced `acceptance-complete.json` in one invocation.
-Independent review of this new evidence is pending.
+[Claude review](https://github.com/monarin/glint/pull/4#pullrequestreview-5831570387) passed at
+`8a8ce94e3f5304f18ee1e35dbb136d8c376d642a` and resolved S4-01.
+This later review-status update changes no runtime code or numerical claims.
 
 Runtime code: `727a91076649c7d33b8434b9708f360e1f7ebbce`.
 Slurm job `44002628`, node `sdfada018`, completed with exit 0 in 28:24, including
