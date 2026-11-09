@@ -72,6 +72,10 @@ def baseline(config,output,group,audit):
         num_groups=config['num_groups'],expected_ordinals=expected,max_bytes=config['max_group_bytes'])
     for key in ('events','lams','n_events','n_sent','n_skipped_wl'):
         if rebuilt[key]!=out[key]: raise ValueError('baseline record reconstruction differs: '+key)
+    for key in ('qframes','peaks'):
+        if len(rebuilt[key])!=len(out[key]) or any(
+                not np.array_equal(a,b) for a,b in zip(rebuilt[key],out[key])):
+            raise ValueError('baseline array reconstruction differs: '+key)
     root=Path(__file__).resolve().parent
     env=Env(config['glint_prelude'],pythonpath=(str(root),str(root.parents[1])),inherit_pythonpath=False)
     worker=worker_type(audit)(env,timeout=config['activation_timeout'],call_timeout=config['call_timeout'])

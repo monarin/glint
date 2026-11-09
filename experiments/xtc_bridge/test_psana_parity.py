@@ -17,8 +17,8 @@ from qrecords import validate_record
 def record(i=0):
     return validate_record(dict(schema_version=1,config_digest='a'*64,experiment='exp',run=1,
         timestamp=2**63+i,source_ordinal=i,group_id=i%3,num_groups=3,producer_rank=2,
-        status='hit',q=np.ones((2,3)),peaks=np.ones((2,3)),wavelength=1.3,
-        calibration_attempts=1,peak_count=2))
+        status='hit',q=np.ones((20,3)),peaks=np.ones((20,3)),wavelength=1.3,
+        calibration_attempts=1,peak_count=20))
 
 
 class ParityTests(unittest.TestCase):
@@ -83,13 +83,17 @@ class ParityTests(unittest.TestCase):
     def test_stream_comparison_checks_metadata_and_positive_orientation(self):
         with tempfile.TemporaryDirectory() as tmp:
             a,b=Path(tmp)/'a.stream',Path(tmp)/'b.stream'
-            report=dict(frames=[dict(event=2,indexed=True,M=np.diag([79.,79.,38.]).tolist())],
-                seed=0,torch='test',numpy='test',matmul_precision='highest',tf32=False,
+            report=dict(frames=[dict(event=2,indexed=True,peak_count=20,matched_strict=15,strict_pass=True,M=np.diag([79.,79.,38.]).tolist())],
+                strict_gate=dict(minimum=10,fraction=.25,tolerance=.15),seed=0,torch='test',numpy='test',matmul_precision='highest',tf32=False,
                 xtc_python_open_guard=True,mpi_imported=False,psana_imported=False)
             for p in (a,b):
                 p.write_text('frozen stream metadata and peaks\n')
                 Path(str(p)+'.index.json').write_text(json.dumps(report))
-            self.assertEqual(compare_streams(a,b,[2]),[2])
+            self.assertEqual(compare_streams(a,b,[2]),dict(raw=[2],strict=[2]))
+            weak=copy.deepcopy(report);weak['frames'][0].update(matched_strict=6,strict_pass=False)
+            for path in (a,b): Path(str(path)+'.index.json').write_text(json.dumps(weak))
+            self.assertEqual(compare_streams(a,b,[2]),dict(raw=[2],strict=[]))
+            for path in (a,b): Path(str(path)+'.index.json').write_text(json.dumps(report))
             with self.assertRaises(ValueError): compare_streams(a,b,[1])
             for key,value in [('mpi_imported',True),('psana_imported',True),('seed',1),('tf32',True)]:
                 Path(str(b)+'.index.json').write_text(json.dumps(dict(report,**{key:value})))
@@ -107,7 +111,25 @@ class ParityTests(unittest.TestCase):
         b['source']['max_events']=14;self.assertNotEqual(science_config(c),science_config(b))
 
 
+    def test_matrix_gates(self):
+        from validate_psana_parity import matrix_gates
+        a=dict(owners={'0':2,'1':3},indexed_events=[1])
+        b=dict(owners={'0':3,'1':2},indexed_events=[1])
+        self.assertEqual(matrix_gates([a,b,b],203,1,[]),([2,2],True))
+        self.assertFalse(matrix_gates([a,b,b],203,2,[])[1])
+        empty=dict(b,indexed_events=[])
+        self.assertFalse(matrix_gates([a,empty,b],203,1,[])[1])
+        with self.assertRaisesRegex(ValueError,'partial'): matrix_gates([a,b,b],200,1,[])
+        with self.assertRaisesRegex(ValueError,'ownership'): matrix_gates([a,a,a],203,1,[])
+        with self.assertRaisesRegex(RuntimeError,'surviving'): matrix_gates([a,b,b],203,1,[123])
+
     def test_full_artifact_comparison_and_corruption(self):
+        self.artifact_fixture(False)
+
+    def test_empty_hit_group_is_valid_parity_without_coverage(self):
+        self.artifact_fixture(True)
+
+    def artifact_fixture(self,empty):
         from qspool import RecordWriter,validate_spools,file_digest
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp);base=root/'baseline';native=root/'native';base.mkdir();native.mkdir()
@@ -120,15 +142,19 @@ class ParityTests(unittest.TestCase):
             def write(path,value): path.write_text(json.dumps(value))
             for d in (base,native): write(d/'config.json',c)
             rows=[record(i) for i in range(4)]
+            if empty:
+                for r in rows:
+                    r.update(status='below_min_peaks',peak_count=0,q=np.empty((0,3)),peaks=np.empty((0,3)))
             frame=frame_digest(np.ones((1,2,3)))
             def audit(selected,seen):
                 return dict(seen=seen,calibrations=[dict(timestamp=r['timestamp'],frame=frame) for r in selected],
                     physical_segments=[[0]],calibration_digests=['a'*64],reads=[],seconds={},max_rss_kib=1)
             def stream(path,selected):
+                selected=[r for r in selected if r['status']=='hit']
                 path.write_text('frozen stream '+str([r['source_ordinal'] for r in selected]))
                 write(Path(str(path)+'.index.json'),dict(
-                    frames=[dict(event=r['source_ordinal'],indexed=True,M=np.diag([79.,79.,38.]).tolist()) for r in selected],
-                    seed=0,torch='test',numpy='test',matmul_precision='highest',tf32=False,
+                    frames=[dict(event=r['source_ordinal'],indexed=True,peak_count=20,matched_strict=15,strict_pass=True,M=np.diag([79.,79.,38.]).tolist()) for r in selected],
+                    strict_gate=dict(minimum=10,fraction=.25,tolerance=.15),seed=0,torch='test',numpy='test',matmul_precision='highest',tf32=False,
                     xtc_python_open_guard=True,mpi_imported=False,psana_imported=False))
             for g in range(3):
                 d=base/f'group-{g}';d.mkdir();selected=[r for r in rows if r['group_id']==g]
@@ -154,13 +180,26 @@ class ParityTests(unittest.TestCase):
             write(native/'mpi-complete.json',dict(status='complete',harness=False,production=gate,ranks=reports,
                 merged=dict(sha256=file_digest(merged),output_bytes=merged.stat().st_size)))
             result=compare(base,native)
-            self.assertTrue(result['parity_pass']);self.assertEqual(result['indexed_events'],[0,1,2,3])
+            self.assertTrue(result['parity_pass']);self.assertEqual(result['indexed_events'],[] if empty else [0,1,2,3])
             self.assertEqual(result['calibration_attempts'],dict(baseline=4,native=4))
-            path=native/'audit-2.json';good=path.read_text();bad=json.loads(good)
-            bad['calibrations'][0]['frame']['sha256']='b'*64;write(path,bad)
-            with self.assertRaisesRegex(ValueError,'image diagnostics'): compare(base,native)
-            path.write_text(good);merged.write_text('corrupted')
-            with self.assertRaisesRegex(ValueError,'merged stream changed'): compare(base,native)
+            def mutate(name,change,error,kind=ValueError):
+                path=native/name;good=path.read_bytes()
+                try:
+                    if change is None: path.unlink()
+                    elif callable(change):
+                        bad=json.loads(good);change(bad);write(path,bad)
+                    else: path.write_text(change)
+                    with self.assertRaisesRegex(kind,error): compare(base,native)
+                finally: path.write_bytes(good)
+            mutate('audit-2.json',lambda x:x.update(calibrations=[]),'BD participation')
+            mutate('audit-0.json',lambda x:x.update(seen=[2**63]),'delivery ownership|control role')
+            mutate('audit-0.json',lambda x:x.update(seen=[2**63+99]),'control role')
+            mutate('group-0.stream','tampered','group stream changed')
+            mutate('merged.stream','tampered','merged stream changed')
+            mutate('audit-3.json',None,'audit-3',FileNotFoundError)
+            mutate('audit-2.json',lambda x:x['calibrations'].pop(),'missing calibration')
+            mutate('audit-2.json',lambda x:x['calibrations'][0]['frame'].update(sha256='b'*64),'image diagnostics')
+            self.assertTrue(compare(base,native)['parity_pass'])
 
 
 if __name__=='__main__': unittest.main(verbosity=2)

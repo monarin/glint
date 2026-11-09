@@ -382,6 +382,8 @@ Jungfrau-16M geometry and the existing r51 lysozyme reference cell from
 wavelength is explicitly fixed at 1.322 A, and V4 thresholds retain their
 defaults. These are a reproducible comparison recipe, not newly established
 instrument calibration or indexing accuracy. Verify paths for the site.
+The per-launch timeout uses the validated `job_timeout` (default 1200 seconds),
+including preflight and reference creation, bounded by the overall `--timeout`.
 The coordinator copies the geometry, freezes all timestamps/calibration hashes,
 and records source hashes before comparisons. It refuses existing output paths.
 
@@ -413,7 +415,7 @@ and counters; the baseline never uses `CpuEventProcessor`.
 `EventManager._read` inside the validation processes. It records exact delivered
 timestamps, each calibration call, dtype/shape/full-byte calibrated-image
 hashes, physical segment IDs, bulk read offsets/returned sizes, phase wall times
-and Linux peak RSS. Image hashing is outside the timed calibration interval and
+and Linux peak RSS of each psana-side process (excluding GLINT children). Image hashing is outside the timed calibration interval and
 adds substantial overhead. Phase intervals are nested, not additive. Bulk
 counts exclude Cython SMD/metadata reads and do not measure physical storage
 traffic or cache misses. Interval overlap is reported separately; no speedup
@@ -422,7 +424,10 @@ or reduced physical disk traffic is inferred from unique event ownership.
 `psana_parity_worker.py` wraps the existing writer only in validation children.
 It freezes Python/NumPy/current-device Torch seeds to zero per group, saves
 full-precision orientation metadata, and records Torch precision settings.
-A Python audit hook rejects attempts to open XTC; the existing child handshake
+Coverage uses `matched_strict(M, q)` on the complete original input q array,
+requiring at least `GATE_MIN` matches and a `GATE_FRAC` matched fraction.
+Raw returned-cell counts are reported separately and do not satisfy coverage.
+A self-tested Python audit hook rejects attempts to open XTC; the existing child handshake
 also rejects psana/MPI imports. This hook is not a general C-library IO tracer.
 The production child does not import this module.
 
@@ -431,11 +436,12 @@ exact calibrated-image diagnostics and sampled peak arrays, q arrays with
 `rtol=1e-10, atol=1e-12`, complete group order, indexed event sets and oriented
 lattices up to unimodular basis changes (`rtol=1e-5, atol=0.002 A`). Stream
 bytes must also match exactly, a deliberately stricter gate that covers geometry,
-peak tables, reflection labels and metadata. Every native case must exercise
+peak tables, reflection labels and metadata. The basis tolerance is redundant
+under this stricter byte equality requirement. Every native case must exercise
 both BDs; the matrix must change event ownership and include a partial batch-5
 tail. It rejects corrupted/missing outputs and surviving tagged processes.
 
-`--min-indexed` defaults to one and cannot be zero. Matching unindexed outputs
+`--min-indexed` counts strict-gate-passing frames, defaults to one and cannot be zero. Matching unindexed outputs
 can produce a numerical parity report but **cannot** produce
 `acceptance-complete.json`; absence of real orientation coverage is a failed
 coverage gate, not a scientific pass. Review the report's exact limits before

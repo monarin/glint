@@ -22,22 +22,37 @@ def initialize(parent,config):
             if name.endswith(('.xtc','.xtc2')):
                 raise RuntimeError('acceptance child attempted XTC access')
     sys.addaudithook(deny_xtc)
+    guard_observed=False
+    try:
+        open('/nonexistent/glint-parity-guard-probe.xtc2', 'rb')
+    except RuntimeError as exc:
+        guard_observed=str(exc)=='acceptance child attempted XTC access'
+    except OSError:
+        pass
+    if not guard_observed: raise RuntimeError('XTC audit guard self-test failed')
     import torch
     import glint_xtc
+    from glint.glint_fast import matched_strict, GATE_MIN, GATE_FRAC, GATE_TOL
     from glint.stream import has_cell
     original=glint_xtc.index_and_write
     def index(out,args,output,report=True):
         random.seed(0);np.random.seed(0)
         torch.random.default_generator.manual_seed(0);torch.cuda.manual_seed(0)
         results,stats,count=original(out,args,output,report=report)
-        rows=[dict(event=int(r['event']),indexed=bool(has_cell(r.get('M'))),
-                   M=np.asarray(r['M']).tolist() if has_cell(r.get('M')) else None)
-              for r in (results or [])]
+        full_q=dict(zip(out['events'],out['qframes']))
+        rows=[]
+        for r in results or []:
+            event=int(r['event']);q=full_q[event];indexed=bool(has_cell(r.get('M')))
+            matched=int(matched_strict(r['M'],q)) if indexed else 0
+            rows.append(dict(event=event,indexed=indexed,
+                M=np.asarray(r['M']).tolist() if indexed else None,
+                peak_count=len(q),matched_strict=matched,
+                strict_pass=bool(indexed and matched>=GATE_MIN and matched>=GATE_FRAC*len(q))))
         atomic_json(Path(str(output)+'.index.json'),dict(
-            frames=rows,seed=0,torch=torch.__version__,numpy=np.__version__,
+            frames=rows,strict_gate=dict(minimum=GATE_MIN,fraction=GATE_FRAC,tolerance=GATE_TOL),seed=0,torch=torch.__version__,numpy=np.__version__,
             matmul_precision=torch.get_float32_matmul_precision(),
             tf32=bool(torch.backends.cuda.matmul.allow_tf32),
-            xtc_python_open_guard=True,mpi_imported='mpi4py' in sys.modules,
+            xtc_python_open_guard=guard_observed,mpi_imported='mpi4py' in sys.modules,
             psana_imported='psana' in sys.modules))
         return results,stats,count
     glint_xtc.index_and_write=index

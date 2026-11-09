@@ -86,15 +86,21 @@ def compare_streams(a,b,expected_events):
         if ([r['event'] for r in report['frames']]!=expected_events or
                 report['mpi_imported'] or report['psana_imported'] or not report['xtc_python_open_guard']):
             raise ValueError('index output identity/isolation differs')
-    for key in ('seed','torch','numpy','matmul_precision','tf32'):
+    for key in ('seed','torch','numpy','matmul_precision','tf32','strict_gate'):
         if left[key]!=right[key]: raise ValueError('index configuration differs: '+key)
-    indexed=[]
+    indexed=[];strict=[]
     for x,y in zip(left['frames'],right['frames']):
-        if x['indexed']!=y['indexed']: raise ValueError('indexed event set differs')
+        for key in ('indexed','peak_count','matched_strict','strict_pass'):
+            if x[key]!=y[key]: raise ValueError('indexed event diagnostics differ: '+key)
+        gate=left['strict_gate']
+        expected=bool(x['indexed'] and x['matched_strict']>=gate['minimum'] and
+                      x['matched_strict']>=gate['fraction']*x['peak_count'])
+        if x['strict_pass']!=expected: raise ValueError('inconsistent strict index gate')
+        if expected: strict.append(x['event'])
         if x['indexed']:
             if not equivalent_basis(x['M'],y['M']): raise ValueError('oriented lattice differs')
             indexed.append(x['event'])
-    return indexed
+    return dict(raw=indexed,strict=strict)
 
 
 def compare(baseline,native):
@@ -136,17 +142,19 @@ def compare(baseline,native):
     if calibration_map(ba,reference)!=calibration_map(audits,reference):
         raise ValueError('calibrated image diagnostics differ')
     error=compare_records(wanted,actual)
-    indexed=[]
+    indexed=[];raw_indexed=[]
     for g in range(config['num_groups']):
         events=sorted(r['source_ordinal'] for r in actual if r['group_id']==g and r['status']=='hit')
-        indexed+=compare_streams(baseline/f'group-{g}'/f'group-{g}.stream',native/f'group-{g}.stream',events)
+        result=compare_streams(baseline/f'group-{g}'/f'group-{g}.stream',native/f'group-{g}.stream',events)
+        indexed+=result['strict'];raw_indexed+=result['raw']
     return dict(parity_pass=True,events=len(actual),hits=gate['statuses']['hit'],
-        indexed_events=sorted(indexed),indexed_coverage=bool(indexed),max_q_abs_error=error,
+        raw_indexed_events=sorted(raw_indexed),indexed_events=sorted(indexed),indexed_coverage=bool(indexed),max_q_abs_error=error,
         batch_size=current['source']['batch_size'],devices=current['devices'],
         owners={str(r['timestamp']):r['producer_rank'] for r in actual},
         calibration_attempts=dict(baseline=sum(len(a['calibrations']) for a in ba),
                                   native=sum(len(a['calibrations']) for a in audits)),
         reads=dict(baseline=read_overlap([r for a in ba for r in a['reads']]),
                    native=read_overlap([r for a in audits for r in a['reads']])),
+        rss_scope='psana-side processes only; excludes GLINT children',
         audits=dict(baseline=[{k:a[k] for k in ('seconds','max_rss_kib')} for a in ba],
                     native=[{k:a[k] for k in ('seconds','max_rss_kib')} for a in audits]))

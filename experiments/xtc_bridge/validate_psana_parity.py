@@ -11,7 +11,7 @@ import sys
 import time
 from glint_probe_common import atomic_json
 from glint_psana import inside_rank, stop_launcher
-from psana_cpu_config import load_config
+from psana_cpu_config import load_config, positive
 from psana_parity_compare import compare
 from qspool import file_digest
 
@@ -28,6 +28,16 @@ def survivors(root):
     return result
 
 
+def matrix_gates(results,event_count,min_indexed,live):
+    if event_count%5==0: raise ValueError('matrix did not exercise a partial batch tail')
+    owners=results[0]['owners']
+    changes=[sum(r['owners'][t]!=owners[t] for t in owners) for r in results[1:]]
+    if not any(changes): raise ValueError('matrix did not change event-to-BD ownership')
+    if live: raise RuntimeError(f'surviving validation processes: {live}')
+    covered=all(len(r['indexed_events'])>=min_indexed for r in results)
+    return changes,covered
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config',type=Path,required=True)
@@ -37,10 +47,13 @@ def main(argv=None):
     parser.add_argument('--min-indexed',type=int,default=1,help='real indexed-event coverage gate, frozen before running')
     args=parser.parse_args(argv)
     if inside_rank(os.environ): raise ValueError('run once outside MPI')
-    if args.timeout<=0 or args.min_indexed<1: raise ValueError('positive deadline and indexed coverage required')
+    positive(args.timeout,'timeout')
+    if args.min_indexed<1: raise ValueError('positive deadline and indexed coverage required')
     root=args.output.resolve();root.mkdir(parents=True,exist_ok=False)
     bridge=Path(__file__).resolve().parent
     raw=json.loads(args.config.read_text());source=raw['source']
+    # Same default/validation as load_config, also before reference creation.
+    raw.setdefault('job_timeout',1200);positive(raw['job_timeout'],'job_timeout')
     if raw['processor'].get('geom'):
         geom=(args.config.parent/raw['processor']['geom']).resolve()
         frozen=root/'reference.geom';frozen.write_bytes(geom.read_bytes())
@@ -58,7 +71,7 @@ def main(argv=None):
         t=time.monotonic()
         with (root/(name+'.log')).open('w') as log:
             process=subprocess.Popen(argv,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
-            try: code=process.wait(timeout=min(remaining,raw.get('job_timeout',600)))
+            try: code=process.wait(timeout=min(remaining,raw['job_timeout']))
             except BaseException:
                 stop_launcher(process);raise
         commands.append(dict(name=name,argv=argv,returncode=code,seconds=time.monotonic()-t))
@@ -89,13 +102,8 @@ def main(argv=None):
             launch(name,['mpirun','-n','4','python',script,'native','--config',str(output/'config.json'),
                          '--output',str(output)],config['psana_prelude'])
             results.append(dict(case=name,**compare(baseline,output)))
-        if source['max_events']%5==0: raise ValueError('matrix did not exercise a partial batch tail')
-        owners=results[0]['owners']
-        changes=[sum(r['owners'][t]!=owners[t] for t in owners) for r in results[1:]]
-        if not any(changes): raise ValueError('matrix did not change event-to-BD ownership')
         live=survivors(root)
-        if live: raise RuntimeError(f'surviving validation processes: {live}')
-        covered=all(len(r['indexed_events'])>=args.min_indexed for r in results)
+        changes,covered=matrix_gates(results,source['max_events'],args.min_indexed,live)
         atomic_json(root/'comparison.json',dict(parity_pass=True,indexed_coverage=covered,
             min_indexed=args.min_indexed,cases=results,ownership_changes=changes,survivors=live,
             wall_seconds=time.monotonic()-started,
