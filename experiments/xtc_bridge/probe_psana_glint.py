@@ -8,8 +8,9 @@ import signal
 import sys
 
 from envbridge import Env, Worker
-from glint_probe_common import (RANK_ROLES, atomic_json, fixture, gpu_identity,
-                                identity, load_config, record_digest, validate_placement)
+from glint_probe_common import (RANK_ROLES, fixture, load_config,
+                                record_digest, validate_placement)
+from glint_psana_common import atomic_json, gpu_identity, identity
 
 
 def interrupted(signum, _frame):

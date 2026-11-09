@@ -8,7 +8,7 @@ import resource
 import sys
 import time
 from unittest.mock import patch
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 
 
 class Proxy:

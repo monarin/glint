@@ -9,7 +9,7 @@ import signal
 import statistics
 import subprocess
 import time
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 from glint_psana import inside_rank,stop_launcher
 from psana_cpu_config import load_config,positive
 from validate_psana_parity import survivors
@@ -99,7 +99,7 @@ def main(argv=None):
     trials=[];by_name={}
     try:
         check=("import sys,json;sys.path.insert(0,"+repr(str(bridge))+");"
-               "from glint_probe_common import gpu_identity;g=[gpu_identity(i) for i in range(2)];"
+               "from glint_psana_common import gpu_identity;g=[gpu_identity(i) for i in range(2)];"
                "assert len({d['pci'] for d in g})==2;print(json.dumps(g))")
         launch(['python','-c',check],config['psana_prelude'],root/'gpu-check.log',120)
         devices=json.loads((root/'gpu-check.log').read_text().strip().splitlines()[-1])

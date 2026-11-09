@@ -9,7 +9,7 @@ import signal
 import sys
 
 from envbridge import Env, Worker
-from glint_probe_common import atomic_json, identity, gpu_identity
+from glint_psana_common import atomic_json, identity, gpu_identity
 from psana_cpu_config import load_config
 from psana_reference import Reference, calibration_digest, event_timestamp
 from qspool import RecordWriter, validate_spools, load_group, records_digest, file_digest

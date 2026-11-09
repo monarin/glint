@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +57,28 @@ class PipelineTests(unittest.TestCase):
         for r in rows:
             w.append(r)
         return w.finish(audit or [])
+
+    def test_runtime_imports_without_probe_or_analysis_runtimes(self):
+        # Fresh process: an earlier test import must not hide an eager dependency.
+        subprocess.run([sys.executable, '-c', '''
+import importlib.abc, sys
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {
+            'glint_probe_common', 'glint_probe_worker', 'psana', 'mpi4py',
+            'cupy', 'torch', 'glint', 'numpy',
+        }:
+            raise AssertionError('unexpected eager import: ' + fullname)
+guard = Block()
+sys.meta_path.insert(0, guard)
+import glint_psana, glint_psana_common, glint_child_runtime, psana_cpu_config
+# The outer launcher/helpers need only stdlib. Record processors may use NumPy.
+sys.meta_path.remove(guard)
+import numpy
+sys.meta_path.insert(0, guard)
+import psana_mpi_producer, qspool, qrecords, xtc_cpu_processor
+import psana_reference, glint_qconsumer
+'''], cwd=Path(__file__).resolve().parent, check=True, timeout=30)
 
     def test_reference_exact_mapping_and_rejection(self):
         r=Reference(reference())

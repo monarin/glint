@@ -11,7 +11,7 @@ import signal
 import subprocess
 import sys
 
-from glint_probe_common import atomic_json, load_config
+from glint_psana_common import atomic_json
 
 
 def launch_command(config, config_path, output, launcher, mode="probe"):
@@ -72,6 +72,7 @@ def main(argv=None):
             from psana_cpu_config import load_config as load_cpu_config
             config = load_cpu_config(args.config)
         else:
+            from glint_probe_common import load_config
             config = load_config(args.config)
         launcher = args.launcher[1:] if args.launcher[:1] == ["--"] else args.launcher
         destination = args.output.resolve()

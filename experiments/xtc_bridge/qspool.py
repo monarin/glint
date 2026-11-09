@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 import numpy as np
 import qrecords as qr
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 
 
 def file_digest(path):

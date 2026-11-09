@@ -157,7 +157,7 @@ which requires successful MPI exit and matching merged-file hash. Empty groups
 produce valid header-only streams. Failures retain diagnostics and return nonzero
 without the final success marker.
 
-Children reuse `glint_probe_worker.initialize` for environment/GPU checks and
+Children reuse `glint_child_runtime.initialize` for environment/GPU checks and
 parent-death protection; they never import psana or mpi4py. Integration is
 rejected in configuration and at the child boundary; indexing gets an explicit
 argument allowlist with `integrate=False`.
@@ -206,7 +206,8 @@ configs/output directories for these cases, with shorter deadlines for fault tes
 | `xtc_cpu_processor` | CPU calibration and existing V4/q adapter |
 | `qrecords`, `qspool` | Record contract, storage and complete groups |
 | `glint_qconsumer` | Ordinary GLINT child and indexing adapter |
-| `glint_probe_common`, `glint_probe_worker` | Shared process/GPU checks and probe helpers |
+| `glint_psana_common`, `glint_child_runtime` | Process/GPU identity, reports and child initialization |
+| `glint_probe_common`, `glint_probe_worker` | Probe configuration, fixtures and echo/index child |
 | `probe_psana_glint` | Synthetic MPI launch/failure probe |
 | `psana_parity_*`, `validate_psana_parity` | Independent scientific acceptance |
 | `psana_ab_*`, `benchmark_psana_ab` | Lightweight paired performance trials |

@@ -7,7 +7,7 @@ import resource
 import time
 from unittest.mock import patch
 import numpy as np
-from glint_probe_common import identity
+from glint_psana_common import identity
 from psana_reference import calibration_digest, event_timestamp
 
 

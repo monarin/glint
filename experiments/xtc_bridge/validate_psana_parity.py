@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 from glint_psana import inside_rank, stop_launcher
 from psana_cpu_config import load_config, positive
 from psana_parity_compare import compare
@@ -79,7 +79,7 @@ def main(argv=None):
         if code: raise RuntimeError(f'{name} exited {code}; see {name}.log')
     try:
         gpu_check=("import sys,json; sys.path.insert(0,"+repr(str(bridge))+"); "
-                   "from glint_probe_common import gpu_identity; import cupy as cp; "
+                   "from glint_psana_common import gpu_identity; import cupy as cp; "
                    "devices=[gpu_identity(i) for i in range(2)]; "
                    "assert len({d['pci'] for d in devices})==2; "
                    "print(json.dumps(devices),flush=True)")
