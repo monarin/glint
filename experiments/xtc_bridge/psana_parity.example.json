@@ -1,0 +1,40 @@
+{
+  "psana_prelude": "source /sdf/group/lcls/ds/ana/sw/conda2/manage/bin/psconda.sh && conda activate xpp_drp_gpu_311 && unset PYTHONPATH && export LCLS_CALIB_HTTP=https://pswww.slac.stanford.edu/ws/calib_ws/",
+  "glint_prelude": "source /sdf/group/lcls/ds/ana/sw/conda1-v4/inst/etc/profile.d/conda.sh && conda activate /sdf/group/lcls/ds/ana/sw/conda1/inst/envs/ana-4.0.58-py3-minipytorch && export CUDA_PATH=/sdf/group/lcls/ds/ana/sw/conda2/inst/envs/xpp_drp_gpu_311/targets/x86_64-linux && export LD_LIBRARY_PATH=\"$CUDA_PATH/lib:$CONDA_PREFIX/lib\"",
+  "expected_child_prefix": "/sdf/group/lcls/ds/ana/sw/conda1/inst/envs/ana-4.0.58-py3-minipytorch",
+  "devices": {
+    "2": 0,
+    "3": 1
+  },
+  "source": {
+    "exp": "mfx100848724",
+    "run": 51,
+    "dir": "/sdf/data/lcls/ds/prj/public01/xtc",
+    "max_events": 203,
+    "batch_size": 1
+  },
+  "reference": "/shared/reference.json",
+  "processor": {
+    "det": "jungfrau",
+    "zdist": 0.35647,
+    "wavelength": 1.322,
+    "peakfinder": "v4",
+    "geom": "/sdf/group/lcls/ds/tools/lute/test_utilities/sfx/mfx100848724_356mm_refined.geom"
+  },
+  "num_groups": 3,
+  "max_chunk_bytes": 8388608,
+  "max_group_bytes": 67108864,
+  "transport_memory_bytes": 536870912,
+  "activation_timeout": 120,
+  "call_timeout": 300,
+  "job_timeout": 600,
+  "cell": [
+    79.17,
+    79.17,
+    37.96,
+    90.0,
+    90.0,
+    90.0
+  ],
+  "nbest": 1
+}
