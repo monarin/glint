@@ -363,3 +363,96 @@ Native MPI progress, real calibration/V4 GPU processing, cross-environment child
 execution and failure cleanup require a separate bounded allocated-node smoke
 run. Stage 4 adds the full frozen scientific comparison across batching and
 worker assignments; Stage 3 does not claim that acceptance result.
+
+## Stage 4: independent acceptance harness
+
+`validate_psana_parity.py` is a separate, opt-in validation command. It does not
+change `glint-psana`, psana core, calibration, finding or indexing algorithms.
+Run it once outside MPI on an allocated single node with two GPUs:
+
+```bash
+python experiments/xtc_bridge/validate_psana_parity.py \
+  --config experiments/xtc_bridge/psana_parity.example.json \
+  --output /shared/scratch/new-parity-run --revision SOURCE_COMMIT --timeout 3000
+```
+
+The example freezes a 1,003-event prefix, three consensus groups, refined
+Jungfrau-16M geometry and the existing r51 lysozyme reference cell from
+`experiments/verify/merges_tofile_vs_crystfel/config.sh`. Distance is 0.356470 m,
+wavelength is explicitly fixed at 1.322 A, and V4 thresholds retain their
+defaults. These are a reproducible comparison recipe, not newly established
+instrument calibration or indexing accuracy. Verify paths for the site.
+The per-launch timeout uses the validated `job_timeout` (900 seconds in the accepted example),
+including preflight and reference creation, bounded by the overall `--timeout`
+(default 1800 seconds). The measured diagnostic matrix needed more than 20
+minutes; reserve at least 30 minutes plus scheduler/setup margin for this recipe.
+The coordinator copies the geometry, freezes all timestamps/calibration hashes,
+and records source hashes before comparisons. It refuses existing output paths.
+
+Call path:
+
+```text
+validate_psana_parity
+  -> freeze_psana_reference (explicit separate reference read)
+  -> K independent psana_parity_run baseline processes
+       -> unchanged xtc_qreader.run_to_qframes(rank=g, nranks=K)
+       -> ordinary GLINT child -> unchanged index_and_write
+  -> three native MPI runs (batch 1, batch 5, batch 5 with GPU assignments swapped)
+       -> psana_parity_run native -> unchanged psana_mpi_producer.main
+       -> ordinary GLINT child -> unchanged glint_qconsumer.index_group
+  -> psana_parity_compare -> comparison.json -> acceptance-complete.json
+```
+
+The legacy reader does not accept a source directory or a DataSource event
+limit. A validation-only factory supplies the same explicit directory,
+`max_events` and baseline batch size. Each independent legacy reader traverses
+the full selected prefix and retains its original modulo calibration filter.
+This is a bounded reference variant, not a measurement of an unbounded legacy
+job. Both paths should make **N calibration calls total**; the expected gain is
+in distribution/read ownership, not removal of calibration calls the legacy
+reader already skips. Baseline records reconstruct the legacy return values
+and counters; the baseline never uses `CpuEventProcessor`.
+
+`psana_parity_audit.py` wraps supplied runs/detectors and observes
+`EventManager._read` inside the validation processes. It records exact delivered
+timestamps, each calibration call, dtype/shape/full-byte calibrated-image
+hashes, physical segment IDs, bulk read offsets/returned sizes, phase wall times
+and Linux peak RSS of each psana-side process (excluding GLINT children). Image hashing is outside the timed calibration interval and
+adds substantial overhead. Phase intervals are nested, not additive. Bulk
+counts exclude Cython SMD/metadata reads and do not measure physical storage
+traffic or cache misses. Interval overlap is reported separately; no speedup
+or reduced physical disk traffic is inferred from unique event ownership.
+
+`psana_parity_worker.py` wraps the existing writer only in validation children.
+It freezes Python/NumPy/current-device Torch seeds to zero per group, saves
+full-precision orientation metadata, and records Torch precision settings.
+Coverage uses `matched_strict(M, q)` on the complete original input q array,
+requiring at least `GATE_MIN` matches and a `GATE_FRAC` matched fraction.
+Raw returned-cell counts are reported separately and do not satisfy coverage.
+A self-tested Python audit hook rejects attempts to open XTC; the existing child handshake
+also rejects psana/MPI imports. This hook is not a general C-library IO tracer.
+The production child does not import this module.
+
+The comparator checks full event/status/ordinal/group/wavelength equality,
+exact calibrated-image diagnostics and sampled peak arrays, q arrays with
+`rtol=1e-10, atol=1e-12`, complete group order, indexed event sets and oriented
+lattices up to unimodular basis changes (`rtol=1e-5, atol=0.002 A`). Stream
+bytes must also match exactly, a deliberately stricter gate that covers geometry,
+peak tables, reflection labels and metadata. The basis tolerance is redundant
+under this stricter byte equality requirement. Every native case must exercise
+both BDs; the matrix must change event ownership and include a partial batch-5
+tail. It rejects corrupted/missing outputs and surviving tagged processes.
+
+`--min-indexed` counts strict-gate-passing frames, defaults to one and cannot be zero. Matching unindexed outputs
+can produce a numerical parity report but **cannot** produce
+`acceptance-complete.json`; absence of real orientation coverage is a failed
+coverage gate, not a scientific pass. Review the report's exact limits before
+using it as a reference for a later GPU backend. Larger groups still incur the
+documented full-spool rescans. Different psana builds that import CuPy/Torch on
+control ranks will fail the strict production isolation check and need a
+separate compatibility decision.
+
+Run CPU checker tests with `python experiments/xtc_bridge/test_psana_parity.py`.
+
+The complete 1,003-event Stage 4 matrix and strict-positive coverage are recorded
+in [Stage 4 correctness acceptance](GLINT_PSANA_STAGE4_ACCEPTANCE.md).
