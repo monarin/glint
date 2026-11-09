@@ -373,7 +373,7 @@ Run it once outside MPI on an allocated single node with two GPUs:
 ```bash
 python experiments/xtc_bridge/validate_psana_parity.py \
   --config experiments/xtc_bridge/psana_parity.example.json \
-  --output /shared/scratch/new-parity-run --revision SOURCE_COMMIT --timeout 1200
+  --output /shared/scratch/new-parity-run --revision SOURCE_COMMIT --timeout 1800
 ```
 
 The example freezes a 203-event prefix, three consensus groups, refined
@@ -383,7 +383,9 @@ wavelength is explicitly fixed at 1.322 A, and V4 thresholds retain their
 defaults. These are a reproducible comparison recipe, not newly established
 instrument calibration or indexing accuracy. Verify paths for the site.
 The per-launch timeout uses the validated `job_timeout` (default 1200 seconds),
-including preflight and reference creation, bounded by the overall `--timeout`.
+including preflight and reference creation, bounded by the overall `--timeout`
+(default 1800 seconds). The measured diagnostic matrix needed more than 20
+minutes; reserve at least 30 minutes plus scheduler/setup margin for this recipe.
 The coordinator copies the geometry, freezes all timestamps/calibration hashes,
 and records source hashes before comparisons. It refuses existing output paths.
 

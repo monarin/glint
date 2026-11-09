@@ -1,6 +1,6 @@
 # Stage 4 validation record
 
-Implementation: `aa7c94163d1221a6b85061cdfe8e0a748e7e9380`.
+Allocated-runtime implementation: `aa7c94163d1221a6b85061cdfe8e0a748e7e9380`.
 Numerical parity passes for three cases; **full acceptance remains incomplete**.
 No `acceptance-complete.json` was produced. This record does not replace that gate.
 
@@ -73,11 +73,20 @@ Shared artifact root:
 - `swap-43986490/` and `swap-43986490.log`: retry provenance and complete output.
 - `review/`: review contexts, responses, test logs and assembled runtime comparison.
 
-Eleven focused checker tests pass with NumPy 1.26 and 2.3.5. They include complete
+Twelve focused checker tests now pass with NumPy 1.26 and 2.3.5. They include complete
 artifact fixtures, missing/corrupted outputs, calibration ownership, idle BD
 rejection, empty-hit groups and matrix gates. Seventeen Stage-3 regression tests
 passed; production code is unchanged. All six GitHub CI checks pass on the
 implementation SHA (runs 42657279405 and 42657291146).
+
+After the allocated runs, review fixes raised the default overall deadline to
+1800 seconds, added independent NumPy recomputation of strict matches from
+spooled q and recorded M, pinned the published gate, cross-checked writer counts,
+and factored/tested child row construction. The stronger comparator was rerun
+against all three saved outputs and still reports exact parity with zero strict
+passes. The final code has not had a new allocated full-matrix run; that remains
+blocked on a suitable frozen fixture. The CI runs above apply to the allocated
+runtime SHA, not the later checker fixes.
 
 Independent Claude review is recorded separately on PR #4. This evidence-only
 record may have a later commit than the implementation SHA above.

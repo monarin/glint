@@ -43,7 +43,7 @@ def main(argv=None):
     parser.add_argument('--config',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--revision',required=True,help='recorded source commit; source hashes also recorded')
-    parser.add_argument('--timeout',type=float,default=1200)
+    parser.add_argument('--timeout',type=float,default=1800)
     parser.add_argument('--min-indexed',type=int,default=1,help='real indexed-event coverage gate, frozen before running')
     args=parser.parse_args(argv)
     if inside_rank(os.environ): raise ValueError('run once outside MPI')

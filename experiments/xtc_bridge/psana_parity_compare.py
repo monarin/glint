@@ -76,13 +76,23 @@ def read_rows(directory,config):
     return summaries,rows
 
 
-def compare_streams(a,b,expected_events):
+def compare_streams(a,b,expected_events,q_by_event):
     # Exact serialized output is a deliberately stricter gate than equivalent cells.
     # This also checks wavelengths, geometry, peaks/intensities, HKLs and metadata.
     if a.read_bytes()!=b.read_bytes(): raise ValueError(f'stream differs: {a.name}')
     left=json.loads(Path(str(a)+'.index.json').read_text())
     right=json.loads(Path(str(b)+'.index.json').read_text())
     for report in (left,right):
+        if report['strict_gate']!=dict(minimum=10,fraction=0.25,tolerance=0.15):
+            raise ValueError('published strict gate changed')
+        for row in report['frames']:
+            q=q_by_event[row['event']]
+            if row['peak_count']!=len(q): raise ValueError('index peak count differs from spool')
+            m=0
+            if row['indexed']:
+                h=q@np.asarray(row['M'],float)
+                m=int((np.abs(h-np.rint(h)).max(axis=1)<0.15).sum())
+            if row['matched_strict']!=m: raise ValueError('strict matches differ from spool')
         if ([r['event'] for r in report['frames']]!=expected_events or
                 report['mpi_imported'] or report['psana_imported'] or not report['xtc_python_open_guard']):
             raise ValueError('index output identity/isolation differs')
@@ -109,11 +119,12 @@ def compare(baseline,native):
     current=json.loads((native/'config.json').read_text())
     if science_config(config)!=science_config(current): raise ValueError('frozen science configuration differs')
     reference=Reference(config['reference'])
-    wanted=[];ba=[]
+    wanted=[];ba=[];baseline_indexed={}
     for g in range(config['num_groups']):
         directory=baseline/f'group-{g}'
         report=json.loads((directory/'baseline-complete.json').read_text())
         if not report['child_reaped'] or report['group']!=g: raise ValueError('baseline incomplete')
+        baseline_indexed[g]=report['indexed']['n_indexed']
         _,rows=read_rows(directory,config);wanted.extend(rows)
         ba.append(json.loads((directory/f'audit-{g}.json').read_text()))
         if ba[-1]['seen']!=reference.value['timestamps']: raise ValueError('baseline traversal differs')
@@ -143,9 +154,13 @@ def compare(baseline,native):
         raise ValueError('calibrated image diagnostics differ')
     error=compare_records(wanted,actual)
     indexed=[];raw_indexed=[]
+    native_indexed={r['group']:r['n_indexed'] for rank in complete['ranks'] for r in rank['groups']}
+    q_by_event={r['source_ordinal']:r['q'] for r in actual if r['status']=='hit'}
     for g in range(config['num_groups']):
         events=sorted(r['source_ordinal'] for r in actual if r['group_id']==g and r['status']=='hit')
-        result=compare_streams(baseline/f'group-{g}'/f'group-{g}.stream',native/f'group-{g}.stream',events)
+        result=compare_streams(baseline/f'group-{g}'/f'group-{g}.stream',native/f'group-{g}.stream',events,q_by_event)
+        if len(result['raw'])!=baseline_indexed[g] or len(result['raw'])!=native_indexed[g]:
+            raise ValueError('writer indexed count differs')
         indexed+=result['strict'];raw_indexed+=result['raw']
     return dict(parity_pass=True,events=len(actual),hits=gate['statuses']['hit'],
         raw_indexed_events=sorted(raw_indexed),indexed_events=sorted(indexed),indexed_coverage=bool(indexed),max_q_abs_error=error,

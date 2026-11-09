@@ -10,6 +10,22 @@ from glint_probe_common import atomic_json
 _ready=None
 
 
+def index_rows(results,events,qframes,has_cell,matched_strict,gate):
+    """Build diagnostics from complete input frames; dependencies are explicit for CPU tests."""
+    if len(events)!=len(qframes) or len(set(events))!=len(events):
+        raise ValueError('invalid input frame mapping')
+    full_q=dict(zip(events,qframes))
+    rows=[]
+    for r in results or []:
+        event=int(r['event']);q=full_q[event];indexed=bool(has_cell(r.get('M')))
+        matched=int(matched_strict(r['M'],q)) if indexed else 0
+        rows.append(dict(event=event,indexed=indexed,
+            M=np.asarray(r['M']).tolist() if indexed else None,
+            peak_count=len(q),matched_strict=matched,
+            strict_pass=bool(indexed and matched>=gate['minimum'] and matched>=gate['fraction']*len(q))))
+    return rows
+
+
 def initialize(parent,config):
     global _ready
     from glint_qconsumer import initialize as initialize_consumer
@@ -39,17 +55,10 @@ def initialize(parent,config):
         random.seed(0);np.random.seed(0)
         torch.random.default_generator.manual_seed(0);torch.cuda.manual_seed(0)
         results,stats,count=original(out,args,output,report=report)
-        full_q=dict(zip(out['events'],out['qframes']))
-        rows=[]
-        for r in results or []:
-            event=int(r['event']);q=full_q[event];indexed=bool(has_cell(r.get('M')))
-            matched=int(matched_strict(r['M'],q)) if indexed else 0
-            rows.append(dict(event=event,indexed=indexed,
-                M=np.asarray(r['M']).tolist() if indexed else None,
-                peak_count=len(q),matched_strict=matched,
-                strict_pass=bool(indexed and matched>=GATE_MIN and matched>=GATE_FRAC*len(q))))
+        gate=dict(minimum=GATE_MIN,fraction=GATE_FRAC,tolerance=GATE_TOL)
+        rows=index_rows(results,out['events'],out['qframes'],has_cell,matched_strict,gate)
         atomic_json(Path(str(output)+'.index.json'),dict(
-            frames=rows,strict_gate=dict(minimum=GATE_MIN,fraction=GATE_FRAC,tolerance=GATE_TOL),seed=0,torch=torch.__version__,numpy=np.__version__,
+            frames=rows,strict_gate=gate,seed=0,torch=torch.__version__,numpy=np.__version__,
             matmul_precision=torch.get_float32_matmul_precision(),
             tf32=bool(torch.backends.cuda.matmul.allow_tf32),
             xtc_python_open_guard=guard_observed,mpi_imported='mpi4py' in sys.modules,
