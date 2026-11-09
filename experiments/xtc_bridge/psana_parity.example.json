@@ -10,7 +10,7 @@
     "exp": "mfx100848724",
     "run": 51,
     "dir": "/sdf/data/lcls/ds/prj/public01/xtc",
-    "max_events": 203,
+    "max_events": 1003,
     "batch_size": 1
   },
   "reference": "/shared/reference.json",
@@ -27,7 +27,7 @@
   "transport_memory_bytes": 536870912,
   "activation_timeout": 120,
   "call_timeout": 300,
-  "job_timeout": 600,
+  "job_timeout": 900,
   "cell": [
     79.17,
     79.17,

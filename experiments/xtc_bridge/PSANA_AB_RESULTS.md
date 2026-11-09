@@ -103,9 +103,9 @@ Per-process thread environment snapshots were not captured; thread settings
 come from the frozen batch script. Cleanup evidence is the tagged-process check
 and native child-reaping records, not an exhaustive process audit.
 
-This benchmark does not close Stage4 scientific acceptance blocker S4-01:
-strict-indexing-positive coverage and the complete scientific acceptance matrix
-remain outstanding. PR4 remains draft.
+This timing benchmark did not close Stage4 acceptance blocker S4-01. A later
+[correctness matrix](GLINT_PSANA_STAGE4_ACCEPTANCE.md) supplies strict-positive
+coverage and a complete single-invocation run; it does not change these timings.
 
 [Claude's final review](https://github.com/monarin/glint/pull/4#pullrequestreview-5830638691) passed the corrected report at
 `f6e39efbef5e082347eab60dc7a2082139928994`, with no remaining blocking A/B

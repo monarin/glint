@@ -1,4 +1,8 @@
-# Stage 4 validation record
+# Historical Stage 4 validation record
+
+A later [1,003-event acceptance matrix](GLINT_PSANA_STAGE4_ACCEPTANCE.md)
+completed in one invocation with strict-positive indexing coverage. The
+incomplete status below describes only the original 203-event attempts.
 
 Allocated-runtime implementation: `aa7c94163d1221a6b85061cdfe8e0a748e7e9380`.
 Numerical parity passes for three cases; **full acceptance remains incomplete**.

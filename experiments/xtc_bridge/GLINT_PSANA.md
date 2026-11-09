@@ -373,16 +373,16 @@ Run it once outside MPI on an allocated single node with two GPUs:
 ```bash
 python experiments/xtc_bridge/validate_psana_parity.py \
   --config experiments/xtc_bridge/psana_parity.example.json \
-  --output /shared/scratch/new-parity-run --revision SOURCE_COMMIT --timeout 1800
+  --output /shared/scratch/new-parity-run --revision SOURCE_COMMIT --timeout 3000
 ```
 
-The example freezes a 203-event prefix, three consensus groups, refined
+The example freezes a 1,003-event prefix, three consensus groups, refined
 Jungfrau-16M geometry and the existing r51 lysozyme reference cell from
 `experiments/verify/merges_tofile_vs_crystfel/config.sh`. Distance is 0.356470 m,
 wavelength is explicitly fixed at 1.322 A, and V4 thresholds retain their
 defaults. These are a reproducible comparison recipe, not newly established
 instrument calibration or indexing accuracy. Verify paths for the site.
-The per-launch timeout uses the validated `job_timeout` (default 1200 seconds),
+The per-launch timeout uses the validated `job_timeout` (900 seconds in the accepted example),
 including preflight and reference creation, bounded by the overall `--timeout`
 (default 1800 seconds). The measured diagnostic matrix needed more than 20
 minutes; reserve at least 30 minutes plus scheduler/setup margin for this recipe.
@@ -453,3 +453,6 @@ control ranks will fail the strict production isolation check and need a
 separate compatibility decision.
 
 Run CPU checker tests with `python experiments/xtc_bridge/test_psana_parity.py`.
+
+The complete 1,003-event Stage 4 matrix and strict-positive coverage are recorded
+in [Stage 4 correctness acceptance](GLINT_PSANA_STAGE4_ACCEPTANCE.md).
