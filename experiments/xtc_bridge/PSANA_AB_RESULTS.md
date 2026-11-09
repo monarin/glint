@@ -107,8 +107,9 @@ This benchmark does not close Stage4 scientific acceptance blocker S4-01:
 strict-indexing-positive coverage and the complete scientific acceptance matrix
 remain outstanding. PR4 remains draft.
 
-Claude's second benchmark review resolved the missing runtime-evidence finding
-AB-01 and accepted the documented frozen-run deferrals. It identified the GPU
-activity attribution above as blocking report finding AB-05. This correction
-and CI metadata tied to the runtime SHA are supplied for the final review round;
-no final approval is claimed yet. Source code and recorded trials are unchanged.
+[Claude's final review](https://github.com/monarin/glint/pull/4#pullrequestreview-5830638691) passed the corrected report at
+`f6e39efbef5e082347eab60dc7a2082139928994`, with no remaining blocking A/B
+findings. AB-01 (runtime evidence), AB-05 (GPU activity attribution) and AB-06
+(provenance) are resolved; documented frozen-run deferrals remain accepted.
+Measured code stays at `e9514a8b7b1bf8dba707de759e704e693e8823cb`.
+This review-status update changes no code, measurements, or interpretation.
