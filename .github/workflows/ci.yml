@@ -614,6 +614,11 @@ jobs:
         working-directory: experiments/xtc_bridge
         run: python test_psana_parity.py
 
+      - name: psana A/B benchmark checker tests
+        if: ${{ !cancelled() }}
+        working-directory: experiments/xtc_bridge
+        run: python test_psana_ab.py
+
       - name: experiments/xtc_bridge/test_geom_manifest.py
         if: ${{ !cancelled() }}
         run: python test_geom_manifest.py
