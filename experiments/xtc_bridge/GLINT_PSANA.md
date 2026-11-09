@@ -141,8 +141,9 @@ chunk loading; this is arithmetic validation, not runtime memory enforcement.
 Reserve extra memory for Python, psana, calibration and CUDA workspaces. Loaded
 group rows detach from chunk backing arrays.
 
-For fixtures, `qrecords.write_record` / `read_record` provide a separate
-single-record NPZ replay format; runtime storage uses only the chunk spool.
+The experimental single-record `qrecords.write_record` / `read_record` API has
+been removed. Use `qspool.RecordWriter` and `iter_records` / `read_chunk` for
+fixtures and replay of the same chunk format used at runtime.
 `to_legacy` validates complete groups including non-hits and rejects mixed configs
 and duplicate identities. Empty groups are valid. Legacy `n_events` counts frames
 reaching finding; `n_skipped_wl` counts calibrated frames rejected for wavelength.

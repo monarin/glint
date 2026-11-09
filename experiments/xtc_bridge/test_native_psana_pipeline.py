@@ -136,6 +136,46 @@ import psana_reference, glint_qconsumer
         w=qspool.RecordWriter(self.root/'tiny',2,'a'*64,1)
         with self.assertRaisesRegex(ValueError,'one event'): w.append(record(0))
 
+    def test_chunk_all_statuses_exact_timestamp_and_read_budget(self):
+        self.c['max_chunk_bytes'] = 10000
+        originals = [record(i, status=status, timestamp=2**64 - 4 + i)
+                     for i, status in enumerate(sorted(qr.STATUSES))]
+        summary = self.spool(originals)
+        self.assertEqual(len(summary['chunks']), 1)
+        entry = summary['chunks'][0]
+        path = self.root / 'producer-2' / entry['name']
+        restored = qspool.read_chunk(path, entry, entry['payload_bytes'])
+        self.assertEqual(len(restored), len(originals))
+        for before, after in zip(originals, restored):
+            self.assertEqual(after['timestamp'], before['timestamp'])
+            self.assertEqual(after['status'], before['status'])
+            np.testing.assert_array_equal(after['q'], before['q'])
+            np.testing.assert_array_equal(after['peaks'], before['peaks'])
+        self.assertEqual(restored[-1]['timestamp'], 2**64 - 1)
+        with self.assertRaisesRegex(ValueError, 'configured payload limit'):
+            qspool.read_chunk(path, entry, entry['payload_bytes'] - 1)
+        with self.assertRaisesRegex(ValueError, 'payload size mismatch'):
+            qspool.read_chunk(path, dict(entry, payload_bytes=entry['payload_bytes'] + 1), 10000)
+
+    def test_chunk_rejects_malformed_archive_and_metadata(self):
+        summary = self.spool([record(0)])
+        entry = summary['chunks'][0]
+        path = self.root / 'producer-2' / entry['name']
+        with np.load(path, allow_pickle=False) as data:
+            original = {key: data[key] for key in data.files}
+        cases = [
+            (dict(original, unexpected=np.zeros(1)), 'unexpected chunk members'),
+            (dict(original, metadata=original['metadata'].astype(np.int32)), 'invalid chunk metadata'),
+            (dict(original, metadata=np.array([{}], dtype=object)), 'Object arrays'),
+        ]
+        for arrays, error in cases:
+            with self.subTest(error=error):
+                np.savez(path, **arrays)
+                # Match the outer manifest so the intended decoder check is reached.
+                changed = dict(entry, file_bytes=path.stat().st_size, sha256=qspool.file_digest(path))
+                with self.assertRaisesRegex(ValueError, error):
+                    qspool.read_chunk(path, changed, 10000)
+
     def test_completion_gate_and_groups_independent_of_bd_count(self):
         a=self.spool([record(0),record(2,status='invalid_wavelength')],audit=[141])
         b=self.spool([record(3,3),record(1,3,status='missing_calibration')],rank=3,audit=[140])
