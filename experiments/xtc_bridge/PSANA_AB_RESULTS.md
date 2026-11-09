@@ -4,7 +4,9 @@ The native path halved application bulk-read bytes, but did **not** improve
 end-to-end runtime on this 203-event sample. Three measured pairs gave median
 wall times of 178.849 s for A and 189.862 s for B: B took 6.16% longer by the
 ratio of medians. The median paired slowdown was 5.60%; individual pairs ranged
-from 3.61% to 9.34%. These are descriptive results, not significance estimates.
+from 3.61% to 9.34%. These are descriptive results, not significance estimates. Persistent GPU
+activity indicates an external workload; exclusive access was not verified,
+so these timings include a possible contention effect.
 
 A is the existing GLINT MPI path with two concurrent serial psana readers.
 B is native glint-psana MPI with SMD0, EB, two BDs and two GLINT children.
@@ -45,18 +47,32 @@ A loads GLINT in its parent and activates separate reader children, so its phase
 boundaries differ. Timers overlap or nest, and rank totals must not be added to
 reconstruct wall time. The measurements do not isolate the slowdown's cause.
 
-Both arms showed strongly uneven sampled GPU utilization (roughly 24–29% on
-one GPU and below 1% on the other, including startup). This is not a balanced,
-indexing-heavy GPU benchmark. Maximum individual-process RSS had medians of
-3,396,208 KiB (A) and 5,119,684 KiB (B); these are not simultaneous job totals.
-A longer representative input is needed to test whether the read-volume saving
-amortizes startup and improves sustained throughput.
+GPU telemetry contains a confound: UUID
+`GPU-3b4c2d1a-0e2b-ec2a-5d7d-519650b2ee9b` already showed 927 MiB resident
+and 25% utilization at the first warm-up sample, before the benchmark's CUDA
+work. Repeated bursts reached 92–98% and 2625 MiB, and a similar pattern persisted
+through all eight trials. This is evidence of a persistent external workload
+(a co-tenant or an earlier surviving process); its identity was not recorded.
+The roughly 24–29% sampled mean utilization and peak memory for this UUID cannot
+be attributed to this benchmark. The benchmark's own indexing work was brief.
+
+Both arms used the same devices and alternated order, but equal contention
+impact is not established. **Exclusive GPU access was not verified.** The wall
+times remain observed outcomes under those conditions, not an uncontended
+performance comparison. The telemetry records UUIDs, whereas placement records
+PCI IDs; their mapping was not captured. A post-run identity query was denied
+because the allocation had ended, so the affected consensus group is unknown.
+
+Maximum individual-process RSS had medians of 3,396,208 KiB (A) and
+5,119,684 KiB (B); these are not simultaneous job totals. A longer representative
+input, with GPU ownership and pre-trial activity checked, is needed to test
+whether read-volume savings improve sustained throughput.
 
 ## Validation and provenance
 
 - Runtime source: `e9514a8b7b1bf8dba707de759e704e693e8823cb`.
 - Slurm job `43992026`, `sdfada008`, completed in 24:56 with exit 0.
-- Two L40S GPUs, eight allocated logical CPUs, 64 GB memory; one thread per
+- Two GPUs on the ada partition, eight allocated logical CPUs, 64 GB memory; one thread per
   configured numerical library. Both launchers use `--bind-to none` within the
   same scheduler affinity. Every recorded reader/parent affinity matches it.
 - Input: `mfx100848724`, run 51, Jungfrau16M, frozen 203-event prefix, batch 5,
@@ -91,8 +107,8 @@ This benchmark does not close Stage4 scientific acceptance blocker S4-01:
 strict-indexing-positive coverage and the complete scientific acceptance matrix
 remain outstanding. PR4 remains draft.
 
-Claude's first benchmark review requested the completed runtime evidence
-(AB-01). That evidence is now collected and validated by the coordinator, but
-final independent review is pending: automatic approval review blocked sending
-the repository and runtime artifacts to the external Claude service without
-explicit authorization for that payload. No final Claude approval is claimed.
+Claude's second benchmark review resolved the missing runtime-evidence finding
+AB-01 and accepted the documented frozen-run deferrals. It identified the GPU
+activity attribution above as blocking report finding AB-05. This correction
+and CI metadata tied to the runtime SHA are supplied for the final review round;
+no final approval is claimed yet. Source code and recorded trials are unchanged.
