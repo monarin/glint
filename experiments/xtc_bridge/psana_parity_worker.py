@@ -5,7 +5,7 @@ import random
 import sys
 from types import SimpleNamespace
 import numpy as np
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 
 _ready=None
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 import numpy as np
 from envbridge import Env, Worker
-from glint_probe_common import atomic_json, identity, gpu_identity
+from glint_psana_common import atomic_json, identity, gpu_identity
 from psana_cpu_config import load_config
 from psana_reference import Reference
 from psana_parity_audit import Audit, Proxy

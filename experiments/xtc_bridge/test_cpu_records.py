@@ -129,30 +129,6 @@ import qrecords, xtc_cpu_processor
             with self.assertRaises(ValueError):
                 qr.validate_record(dict(record(), q=value))
 
-    def test_npz_roundtrip_all_statuses_exact_timestamp_and_budget(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "event.npz"
-            for status in qr.STATUSES:
-                r = record(status=status)
-                r["timestamp"] = 2**64 - 1
-                size = qr.record_nbytes(r)
-                qr.write_record(path, r, max_bytes=size)
-                restored = qr.read_record(path, max_bytes=size)
-                self.assertEqual(restored["timestamp"], 2**64 - 1)
-                self.assertEqual(restored["status"], status)
-                np.testing.assert_array_equal(restored["q"], r["q"])
-                np.testing.assert_array_equal(restored["peaks"], r["peaks"])
-                with self.assertRaises(ValueError):
-                    qr.write_record(path, r, max_bytes=size - 1)
-                with self.assertRaises(ValueError):
-                    qr.read_record(path, max_bytes=size - 1)
-            np.savez(path, metadata=np.array([{}], dtype=object), q=r["q"], peaks=r["peaks"])
-            with self.assertRaises(ValueError):
-                qr.read_record(path)
-            np.savez(path, unexpected=np.zeros(1))
-            with self.assertRaises(ValueError):
-                qr.read_record(path)
-
     def test_wire_roundtrip_uses_existing_codec(self):
         class MemorySocket:
             def __init__(self):

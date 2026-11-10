@@ -3,7 +3,7 @@ import argparse
 import os
 from pathlib import Path
 from glint_psana import inside_rank
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 from psana_reference import Reference, calibration_digest, event_timestamp
 
 

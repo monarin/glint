@@ -2,6 +2,7 @@
 import copy
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -56,6 +57,28 @@ class PipelineTests(unittest.TestCase):
         for r in rows:
             w.append(r)
         return w.finish(audit or [])
+
+    def test_runtime_imports_without_probe_or_analysis_runtimes(self):
+        # Fresh process: an earlier test import must not hide an eager dependency.
+        subprocess.run([sys.executable, '-c', '''
+import importlib.abc, sys
+class Block(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname.split('.')[0] in {
+            'glint_probe_common', 'glint_probe_worker', 'psana', 'mpi4py',
+            'cupy', 'torch', 'glint', 'numpy',
+        }:
+            raise AssertionError('unexpected eager import: ' + fullname)
+guard = Block()
+sys.meta_path.insert(0, guard)
+import glint_psana, glint_psana_common, glint_child_runtime, psana_cpu_config
+# The outer launcher/helpers need only stdlib. Record processors may use NumPy.
+sys.meta_path.remove(guard)
+import numpy
+sys.meta_path.insert(0, guard)
+import psana_mpi_producer, qspool, qrecords, xtc_cpu_processor
+import psana_reference, glint_qconsumer
+'''], cwd=Path(__file__).resolve().parent, check=True, timeout=30)
 
     def test_reference_exact_mapping_and_rejection(self):
         r=Reference(reference())
@@ -112,6 +135,46 @@ class PipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'digest'): list(qspool.iter_records(self.root,s,1024))
         w=qspool.RecordWriter(self.root/'tiny',2,'a'*64,1)
         with self.assertRaisesRegex(ValueError,'one event'): w.append(record(0))
+
+    def test_chunk_all_statuses_exact_timestamp_and_read_budget(self):
+        self.c['max_chunk_bytes'] = 10000
+        originals = [record(i, status=status, timestamp=2**64 - 4 + i)
+                     for i, status in enumerate(sorted(qr.STATUSES))]
+        summary = self.spool(originals)
+        self.assertEqual(len(summary['chunks']), 1)
+        entry = summary['chunks'][0]
+        path = self.root / 'producer-2' / entry['name']
+        restored = qspool.read_chunk(path, entry, entry['payload_bytes'])
+        self.assertEqual(len(restored), len(originals))
+        for before, after in zip(originals, restored):
+            self.assertEqual(after['timestamp'], before['timestamp'])
+            self.assertEqual(after['status'], before['status'])
+            np.testing.assert_array_equal(after['q'], before['q'])
+            np.testing.assert_array_equal(after['peaks'], before['peaks'])
+        self.assertEqual(restored[-1]['timestamp'], 2**64 - 1)
+        with self.assertRaisesRegex(ValueError, 'configured payload limit'):
+            qspool.read_chunk(path, entry, entry['payload_bytes'] - 1)
+        with self.assertRaisesRegex(ValueError, 'payload size mismatch'):
+            qspool.read_chunk(path, dict(entry, payload_bytes=entry['payload_bytes'] + 1), 10000)
+
+    def test_chunk_rejects_malformed_archive_and_metadata(self):
+        summary = self.spool([record(0)])
+        entry = summary['chunks'][0]
+        path = self.root / 'producer-2' / entry['name']
+        with np.load(path, allow_pickle=False) as data:
+            original = {key: data[key] for key in data.files}
+        cases = [
+            (dict(original, unexpected=np.zeros(1)), 'unexpected chunk members'),
+            (dict(original, metadata=original['metadata'].astype(np.int32)), 'invalid chunk metadata'),
+            (dict(original, metadata=np.array([{}], dtype=object)), 'Object arrays'),
+        ]
+        for arrays, error in cases:
+            with self.subTest(error=error):
+                np.savez(path, **arrays)
+                # Match the outer manifest so the intended decoder check is reached.
+                changed = dict(entry, file_bytes=path.stat().st_size, sha256=qspool.file_digest(path))
+                with self.assertRaisesRegex(ValueError, error):
+                    qspool.read_chunk(path, changed, 10000)
 
     def test_completion_gate_and_groups_independent_of_bd_count(self):
         a=self.spool([record(0),record(2,status='invalid_wavelength')],audit=[141])

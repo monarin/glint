@@ -5,7 +5,7 @@ import os
 import qrecords
 from psana_reference import Reference
 from qspool import records_digest, file_digest
-from glint_probe_worker import initialize as initialize_runtime, isolated
+from glint_child_runtime import initialize as initialize_runtime, isolated
 
 _ready=None
 

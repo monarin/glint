@@ -2,17 +2,13 @@
 
 No reader, MPI, CUDA or GLINT imports. A record accounts for one in-range event,
 including a non-hit. Out-of-range delivery is a separate Stage-3 audit concern.
-The single-record NPZ helpers are for fixtures/replay; bounded chunk spooling and
-whole-run manifest validation belong to the MPI producer, not this module.
+Bounded chunk storage and replay belong to qspool; this module defines the
+record contract and the complete-group adapter for the existing GLINT indexer.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import os
-from pathlib import Path
-import tempfile
-import zipfile
 
 import numpy as np
 
@@ -21,7 +17,6 @@ STATUSES = {"hit", "below_min_peaks", "missing_calibration", "invalid_wavelength
 FIELDS = {"schema_version", "config_digest", "experiment", "run", "timestamp",
           "source_ordinal", "group_id", "num_groups", "producer_rank", "status",
           "q", "peaks", "wavelength", "calibration_attempts", "peak_count"}
-DEFAULT_MAX_BYTES = 16 * 1024 * 1024
 
 
 def integer(value, name, minimum=0, maximum=None):
@@ -90,48 +85,6 @@ def record_nbytes(record):
     """Compact payload bytes, excluding allocator/NPZ/transport overhead."""
     validate_record(record)
     return len(_metadata(record)) + record["q"].nbytes + record["peaks"].nbytes
-
-
-def write_record(path, record, *, max_bytes=DEFAULT_MAX_BYTES):
-    """Atomically replace one replay/fixture file using numeric arrays + JSON, no pickle."""
-    integer(max_bytes, "max_bytes", 1)
-    if record_nbytes(record) > max_bytes:
-        raise ValueError("record exceeds max_bytes")
-    path = Path(path)
-    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
-    try:
-        with os.fdopen(fd, "wb") as stream:
-            np.savez(stream, metadata=np.frombuffer(_metadata(record), dtype=np.uint8),
-                     q=record["q"], peaks=record["peaks"])
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
-
-
-def read_record(path, *, max_bytes=DEFAULT_MAX_BYTES):
-    integer(max_bytes, "max_bytes", 1)
-    # Inspect uncompressed sizes before NumPy allocates/decompresses any arrays.
-    with open(path, "rb") as stream:
-        with zipfile.ZipFile(stream) as archive:
-            entries = archive.infolist()
-            if (len(entries) != 3 or {x.filename for x in entries} !=
-                    {"metadata.npy", "q.npy", "peaks.npy"}):
-                raise ValueError("unexpected record archive members")
-            if sum(x.file_size for x in entries) > max_bytes + 4096:
-                raise ValueError("record archive exceeds max_bytes (including header allowance)")
-        stream.seek(0)
-        with np.load(stream, allow_pickle=False) as data:
-            metadata = data["metadata"]
-            if metadata.dtype != np.uint8 or metadata.ndim != 1:
-                raise ValueError("metadata must be UTF-8 bytes")
-            record = json.loads(metadata.tobytes().decode("utf-8"))
-            if not isinstance(record, dict) or "q" in record or "peaks" in record:
-                raise ValueError("invalid record metadata")
-            record.update(q=data["q"], peaks=data["peaks"])
-    if record_nbytes(record) > max_bytes:
-        raise ValueError("record exceeds max_bytes")
-    return record
 
 
 def to_legacy(records, *, experiment, run, config_digest, group_id, num_groups,

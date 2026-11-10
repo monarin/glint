@@ -17,8 +17,9 @@ from unittest.mock import Mock, patch
 import numpy as np
 
 from envbridge import Env, RemoteError, Worker
-from glint_probe_common import (RANK_ROLES, fixture, identity, load_config,
+from glint_probe_common import (RANK_ROLES, fixture, load_config,
                                 record_digest, validate_placement)
+from glint_psana_common import identity
 from glint_psana import inside_rank, launch_command, main as launcher_main
 from probe_psana_glint import producer
 
@@ -175,7 +176,7 @@ class ProbeTests(unittest.TestCase):
         self.assertFalse((self.root / "out").exists())
 
     def test_late_cancellation_removes_success_marker(self):
-        from glint_probe_common import atomic_json
+        from glint_psana_common import atomic_json
         output = self.root / "out"
 
         def started(*_args, **_kwargs):
@@ -206,7 +207,8 @@ class ProbeTests(unittest.TestCase):
 import json, os, time
 from pathlib import Path
 from envbridge import Env, Worker
-from glint_probe_common import identity, load_config
+from glint_psana_common import identity
+from glint_probe_common import load_config
 c = load_config(os.environ['PROBE_CONFIG'])
 w = Worker(Env(c['glint_prelude'], inherit_pythonpath=False), timeout=5)
 w.start()

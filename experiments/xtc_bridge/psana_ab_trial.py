@@ -3,7 +3,7 @@ import argparse
 import os
 from pathlib import Path
 from unittest.mock import patch
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 from psana_cpu_config import load_config
 from psana_ab_measure import Metrics
 

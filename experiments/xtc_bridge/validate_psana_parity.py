@@ -9,7 +9,7 @@ import signal
 import subprocess
 import sys
 import time
-from glint_probe_common import atomic_json
+from glint_psana_common import atomic_json
 from glint_psana import inside_rank, stop_launcher
 from psana_cpu_config import load_config, positive
 from psana_parity_compare import compare
@@ -45,7 +45,12 @@ def main(argv=None):
     parser.add_argument('--revision',required=True,help='recorded source commit; source hashes also recorded')
     parser.add_argument('--timeout',type=float,default=1800)
     parser.add_argument('--min-indexed',type=int,default=1,help='real indexed-event coverage gate, frozen before running')
+    parser.add_argument('launcher',nargs=argparse.REMAINDER,
+                        help='optional native MPI launcher after -- (default: mpirun -n 4)')
     args=parser.parse_args(argv)
+    launcher=args.launcher[1:] if args.launcher[:1]==['--'] else args.launcher
+    if args.launcher and not launcher: parser.error('provide an MPI launcher after --')
+    launcher=launcher or ['mpirun','-n','4']
     if inside_rank(os.environ): raise ValueError('run once outside MPI')
     positive(args.timeout,'timeout')
     if args.min_indexed<1: raise ValueError('positive deadline and indexed coverage required')
@@ -79,7 +84,7 @@ def main(argv=None):
         if code: raise RuntimeError(f'{name} exited {code}; see {name}.log')
     try:
         gpu_check=("import sys,json; sys.path.insert(0,"+repr(str(bridge))+"); "
-                   "from glint_probe_common import gpu_identity; import cupy as cp; "
+                   "from glint_psana_common import gpu_identity; import cupy as cp; "
                    "devices=[gpu_identity(i) for i in range(2)]; "
                    "assert len({d['pci'] for d in devices})==2; "
                    "print(json.dumps(devices),flush=True)")
@@ -99,7 +104,7 @@ def main(argv=None):
             trial=copy.deepcopy(config);trial['source']['batch_size']=batch
             if swapped: trial['devices']={k:1-v for k,v in trial['devices'].items()}
             output=root/name;output.mkdir();atomic_json(output/'config.json',trial)
-            launch(name,['mpirun','-n','4','python',script,'native','--config',str(output/'config.json'),
+            launch(name,[*launcher,'python',script,'native','--config',str(output/'config.json'),
                          '--output',str(output)],config['psana_prelude'])
             results.append(dict(case=name,**compare(baseline,output)))
         live=survivors(root)
