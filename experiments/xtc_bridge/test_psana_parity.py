@@ -152,6 +152,37 @@ class ParityTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'ownership'): matrix_gates([a,a,a],203,1,[])
         with self.assertRaisesRegex(RuntimeError,'surviving'): matrix_gates([a,b,b],203,1,[123])
 
+    def test_matrix_launcher_only_wraps_native_cases_and_is_recorded(self):
+        import shlex
+        import validate_psana_parity as matrix
+        for launcher in ([], ['srun','--mpi=cray_shasta','-n','4','--gpu-bind=none']):
+            with self.subTest(launcher=launcher), tempfile.TemporaryDirectory() as tmp:
+                root=Path(tmp); config=root/'config.json'; output=root/'output with spaces'
+                config.write_text(json.dumps(dict(source=dict(exp='exp',run=1,dir=tmp,max_events=13),
+                    processor=dict(det='jungfrau'),num_groups=3,devices={'2':0,'3':1},
+                    psana_prelude='true')))
+                cases=[dict(owners={'a':2,'b':3},indexed_events=[1]),
+                       dict(owners={'a':3,'b':2},indexed_events=[1])]
+                with patch.object(matrix.subprocess,'Popen') as popen, \
+                     patch.object(matrix,'load_config',side_effect=lambda p:json.loads(p.read_text())), \
+                     patch.object(matrix,'compare',side_effect=[cases[0],cases[1],cases[1]]), \
+                     patch.object(matrix,'survivors',return_value=[]):
+                    popen.return_value.wait.return_value=0
+                    self.assertEqual(matrix.main(['--config',str(config),'--output',str(output),
+                        '--revision','test']+(['--',*launcher] if launcher else [])),0)
+                commands=json.loads((output/'commands.json').read_text())
+                self.assertEqual([c['name'] for c in commands],['gpu-check','freeze',
+                    'baseline-0','baseline-1','baseline-2','batch1','batch5','batch5-swapped'])
+                self.assertEqual([c['argv'] for c in commands],
+                                 [call.args[0] for call in popen.call_args_list])
+                expected=launcher or ['mpirun','-n','4']
+                for i,c in enumerate(commands):
+                    argv=shlex.split(c['argv'][2].split(' && exec ',1)[1])
+                    if i<5: self.assertEqual(argv[0],'python')
+                    else:
+                        self.assertEqual(argv[:len(expected)],expected)
+                        self.assertEqual(argv[-2:],['--output',str(output/c['name'])])
+
     def test_full_artifact_comparison_and_corruption(self):
         self.artifact_fixture(False)
 

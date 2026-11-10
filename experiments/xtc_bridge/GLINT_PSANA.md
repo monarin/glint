@@ -238,6 +238,13 @@ python experiments/xtc_bridge/validate_psana_parity.py \
   --output /shared/new-parity-run --revision SOURCE_COMMIT --timeout 3000
 ```
 
+The native cases default to `mpirun -n 4`. To use a verified site launcher,
+append it after `--`, for example `-- srun --mpi=cray_shasta --nodes=1
+--ntasks=4 --cpus-per-task=16 --gpu-bind=none`. The coordinator must stay outside
+MPI and numbered Slurm steps; only the three native cases use this launcher.
+Reference freezing and the three independent serial readers stay serial.
+Every executed command is recorded in `commands.json`.
+
 The example uses a 1,003-event r51 Jungfrau-16M prefix, three groups, refined geometry,
 distance 0.356470 m, wavelength 1.322 A, existing lysozyme cell and default V4 thresholds.
 It is a comparison recipe, not new instrument calibration or general indexing-accuracy

@@ -45,7 +45,12 @@ def main(argv=None):
     parser.add_argument('--revision',required=True,help='recorded source commit; source hashes also recorded')
     parser.add_argument('--timeout',type=float,default=1800)
     parser.add_argument('--min-indexed',type=int,default=1,help='real indexed-event coverage gate, frozen before running')
+    parser.add_argument('launcher',nargs=argparse.REMAINDER,
+                        help='optional native MPI launcher after -- (default: mpirun -n 4)')
     args=parser.parse_args(argv)
+    launcher=args.launcher[1:] if args.launcher[:1]==['--'] else args.launcher
+    if args.launcher and not launcher: parser.error('provide an MPI launcher after --')
+    launcher=launcher or ['mpirun','-n','4']
     if inside_rank(os.environ): raise ValueError('run once outside MPI')
     positive(args.timeout,'timeout')
     if args.min_indexed<1: raise ValueError('positive deadline and indexed coverage required')
@@ -99,7 +104,7 @@ def main(argv=None):
             trial=copy.deepcopy(config);trial['source']['batch_size']=batch
             if swapped: trial['devices']={k:1-v for k,v in trial['devices'].items()}
             output=root/name;output.mkdir();atomic_json(output/'config.json',trial)
-            launch(name,['mpirun','-n','4','python',script,'native','--config',str(output/'config.json'),
+            launch(name,[*launcher,'python',script,'native','--config',str(output/'config.json'),
                          '--output',str(output)],config['psana_prelude'])
             results.append(dict(case=name,**compare(baseline,output)))
         live=survivors(root)
